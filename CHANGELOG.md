@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Undefined variable 'i' in doctest examples
 - Refactored task_flow and batch_processing functions
 
-## [3.0.0] - 2025-03-27
+## [0.0.1] - 2025-03-27
 
 ### Added
 - Initial release of redesigned LLMAgent library
