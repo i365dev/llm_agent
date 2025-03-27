@@ -55,10 +55,10 @@ defmodule LLMAgent.MixProject do
       source_url: "https://github.com/i365dev/llm_agent",
       formatters: ["html"],
       groups_for_extras: [
-        "Guides": Path.wildcard("guides/*.md")
+        Guides: Path.wildcard("guides/*.md")
       ],
       groups_for_modules: [
-        "Core": [
+        Core: [
           LLMAgent,
           LLMAgent.Signals,
           LLMAgent.Handlers,
@@ -69,10 +69,10 @@ defmodule LLMAgent.MixProject do
           LLMAgent.Providers.OpenAI,
           LLMAgent.Providers.Anthropic
         ],
-        "Plugins": [
+        Plugins: [
           LLMAgent.Plugin
         ],
-        "Tasks": [
+        Tasks: [
           LLMAgent.Tasks
         ]
       ],

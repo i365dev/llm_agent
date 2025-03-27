@@ -8,7 +8,7 @@ defmodule LLMAgent.Flows do
   """
 
   alias LLMAgent.{Store, Handlers, Signals}
-  
+
   @doc """
   Creates a standard conversation flow with the given system prompt and tools.
 
@@ -94,17 +94,20 @@ defmodule LLMAgent.Flows do
       # For now, we're implementing a simplified version
       try do
         # Execute each primitive in sequence
-        {result, new_state} = 
-          Enum.reduce(task_definition, {signal, state_with_primitives}, fn primitive, {_signal, current_state} ->
+        {result, new_state} =
+          Enum.reduce(task_definition, {signal, state_with_primitives}, fn primitive,
+                                                                           {_signal,
+                                                                            current_state} ->
             # Execute the primitive with the current signal and state
             case primitive.(current_state) do
               {:ok, result, updated_state} ->
                 {result, updated_state}
+
               {:error, reason} ->
                 throw({:error, reason})
             end
           end)
-        
+
         {{:emit, result}, Map.drop(new_state, [:primitives])}
       catch
         {:error, reason} ->
@@ -142,25 +145,26 @@ defmodule LLMAgent.Flows do
     fn signal, state ->
       # Initialize batch state
       batch = Map.get(state, :batch, %{items: items, index: 0})
-      
+
       # Check if processing is complete
       if batch.index >= length(batch.items) do
         {{:halt, signal}, state}
       else
         # Get current item
         current_item = Enum.at(batch.items, batch.index)
-        
+
         # Apply batch handler to current item
         state_with_item = Map.put(state, :current_item, current_item)
         {signal_result, new_state} = batch_handler.(signal, state_with_item)
-        
+
         # Update batch state for next item
         updated_batch = %{batch | index: batch.index + 1}
-        final_state = 
+
+        final_state =
           new_state
           |> Map.put(:batch, updated_batch)
           |> Map.delete(:current_item)
-          
+
         {signal_result, final_state}
       end
     end
@@ -199,7 +203,7 @@ defmodule LLMAgent.Flows do
     fn signal, state ->
       # Execute the original flow
       {signal_result, new_state} = flow.(signal, state)
-      
+
       # Apply transformation
       transform_fn.({signal_result, new_state})
     end
@@ -305,9 +309,10 @@ defmodule LLMAgent.Flows do
       end)
     end)
   end
-  
+
   # Helper function to handle signals with a handler
   defp handle_with({:halt, _} = result, _handler, _signal), do: result
+
   defp handle_with({:skip, state}, handler, signal) do
     case handler.(signal, state) do
       {:skip, new_state} -> {:skip, new_state}
@@ -318,9 +323,11 @@ defmodule LLMAgent.Flows do
       {{:halt, result}, _} -> {:halt, result}
     end
   end
+
   defp handle_with({:emit, new_signal, state}, handler, _signal) do
     handle_with({:skip, state}, handler, new_signal)
   end
+
   defp handle_with(state, handler, signal) when is_map(state) do
     case handler.(signal, state) do
       {:skip, new_state} -> {:skip, new_state}
