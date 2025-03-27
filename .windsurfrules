@@ -1,0 +1,217 @@
+# LLMAgent Development Rules
+
+## Project Philosophy & Scope
+
+LLMAgent is an abstraction library built on top of AgentForge that specializes in LLM-powered agent interactions. Its core design principles are:
+
+- **LLM-Specific Abstractions**: Create patterns optimized for LLM interactions
+- **Separation of Concerns**: Clearly delineate LLM logic from infrastructure
+- **Elixir Ecosystem Integration**: Leverage the strengths of Elixir/OTP
+- **Lightweight Implementation**: Maintain a clean, minimal codebase
+- **Testability**: Ensure components can be tested in isolation
+
+This is a personal project with a focus on clean architecture and practical implementation.
+
+## System Architecture Rules
+
+1. **Build on AgentForge**: LLMAgent extends AgentForge's signal-driven architecture
+2. **Clear Component Boundaries**: Each component has well-defined responsibilities
+3. **Maintain Information Flow**: Follow established signal patterns
+4. **Minimal Dependencies**: Only include necessary external dependencies
+5. **Plugin-Based Extensions**: Use plugins for provider-specific functionality
+
+## Code Style & Organization
+
+### Naming Conventions
+
+- **Modules**: CamelCase, descriptive of purpose (`LLMAgent.Handlers`, `LLMAgent.Signals`)
+- **Functions**: snake_case, verb-based, descriptive (`process_message`, `execute_tool`)
+- **Variables**: snake_case, clear purpose (`user_message`, `tool_result`)
+- **Signals**: Atom types, descriptive of state (`:user_message`, `:thinking`, `:tool_call`)
+- **Constants**: ALL_CAPS for true constants, CamelCase for configuration
+
+### Directory Structure
+
+```
+lib/
+  llm_agent/        # Core LLMAgent modules
+    signals.ex      # Signal definitions
+    handlers.ex     # Signal handlers 
+    store.ex        # State management
+    flows.ex        # Flow compositions
+    plugin.ex       # LLM provider plugin definition
+    tasks.ex        # Long-running tasks
+    providers/      # LLM provider implementations
+    integrations/   # External service integrations
+test/
+  llm_agent/        # Test modules matching lib structure
+  fixtures/         # Test data and fixtures
+```
+
+### Code Format
+
+- Follow standard Elixir formatting with `mix format`
+- Maximum line length of 98 characters
+- Use 2-space indentation
+- Align function parameters for readability
+- Group related functions together
+- Public functions first, followed by private functions
+
+## Documentation Requirements
+
+1. **Module Documentation**:
+   - Every module must have a `@moduledoc`
+   - Explain the module's purpose and responsibilities
+   - Document how it fits in the overall architecture
+
+2. **Function Documentation**:
+   - All public functions must have a `@doc` comment
+   - Include `@spec` type specifications
+   - Document parameters and return values
+   - Provide examples for non-trivial functions
+
+3. **Architecture Documentation**:
+   - Maintain high-level architecture documentation
+   - Keep diagrams up-to-date
+   - Document integration points and extension mechanisms
+
+## Testing Standards
+
+1. **Test Coverage**:
+   - Minimum 80% test coverage for core modules
+   - Test all signal transitions
+   - Test error recovery paths
+   - Test with realistic LLM provider mocks
+
+2. **Test Organization**:
+   - Match test module structure to library structure
+   - Use descriptive test names
+   - Group related tests with `describe` blocks
+   - Separate unit and integration tests
+
+3. **Test Performance**:
+   - Keep tests fast
+   - Use mocks for external dependencies
+   - Avoid unnecessary test setup
+
+## Error Handling Principles
+
+1. **Signal-Based Errors**:
+   - Use error signals for recoverable errors
+   - Include context in error metadata
+   - Allow flows to handle and recover
+
+2. **Explicit Error Types**:
+   - Use tagged tuples for function results
+   - Differentiate between types of errors
+   - Provide clear error messages
+
+3. **External Failures**:
+   - Handle external service failures gracefully
+   - Implement timeouts for all external calls
+   - Provide fallback mechanisms where appropriate
+
+## Component Guidelines
+
+### Signals
+
+- Extend AgentForge.Signal with LLM-specific signal types
+- Use descriptive signal types that reflect agent mental processes
+- Include appropriate metadata for debugging and tracing
+- Maintain signal immutability
+
+### Handlers
+
+- Keep handlers focused on a single signal type
+- Follow the AgentForge handler function signature
+- Ensure state transformations are explicit and documented
+- Implement proper error handling
+
+### Store
+
+- Define clear state structure
+- Document state fields
+- Use immutable updates
+- Prune state to manage memory usage
+
+### Flows
+
+- Compose handlers in logical sequences
+- Document flow behavior
+- Provide standard flow compositions for common patterns
+- Ensure signal transitions are clear
+
+### Plugins
+
+- Implement the AgentForge.Plugin behavior
+- Abstract provider-specific details
+- Handle authentication and credentials
+- Implement proper error handling
+
+### Tasks
+
+- Define tasks as sequences of AgentForge primitives
+- Support long-running operations
+- Provide task monitoring and control
+- Ensure task results are properly handled
+
+## Performance Guidelines
+
+1. **Memory Management**:
+   - Limit conversation history size
+   - Prune unnecessary state
+   - Be mindful of large data structures
+
+2. **Concurrency**:
+   - Use Tasks for parallel operations
+   - Implement proper process supervision
+   - Avoid blocking operations
+
+3. **Optimization**:
+   - Focus on readability first, optimize later
+   - Optimize critical paths based on measurement
+   - Document performance considerations
+
+## Version Control
+
+1. **Commit Messages**:
+   - Use descriptive commit messages
+   - Reference issues where applicable
+   - Keep commits focused
+
+2. **Branching**:
+   - Use feature branches for development
+   - Maintain a stable main branch
+   - Use semantic versioning for releases
+
+## Third-Party Integration
+
+1. **LLM Providers**:
+   - Abstract provider-specific APIs
+   - Support credential management
+   - Handle rate limiting and quotas
+
+2. **External Tools**:
+   - Define clear tool interfaces
+   - Support both synchronous and async tools
+   - Provide execution context to tools
+
+## Development Workflow
+
+1. **Plan**: Define clear component requirements
+2. **Implement**: Follow architecture and coding guidelines
+3. **Test**: Ensure comprehensive test coverage
+4. **Document**: Update documentation with changes
+5. **Review**: Perform self-review before submission
+
+## Dependency Management
+
+1. **Explicit Dependencies**:
+   - List all dependencies with version constraints
+   - Document dependency purposes
+   - Mark provider-specific dependencies as optional
+
+2. **Minimal Dependencies**:
+   - Only include necessary dependencies
+   - Prefer Elixir standard library when possible
+   - Avoid dependencies with complex build requirements
