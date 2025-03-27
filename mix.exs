@@ -22,7 +22,8 @@ defmodule LLMAgent.MixProject do
         "coveralls.html": :test,
         "coveralls.github": :test
       ],
-      description: "An abstraction library for building domain-specific intelligent agents based on Large Language Models",
+      description:
+        "An abstraction library for building domain-specific intelligent agents based on Large Language Models",
       package: package(),
       homepage_url: @source_url,
       source_url: @source_url
@@ -66,7 +67,9 @@ defmodule LLMAgent.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"] ++ Path.wildcard("guides/*.md"),
+      extras:
+        ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"] ++
+          Path.wildcard("guides/*.md"),
       source_url: @source_url,
       formatters: ["html"],
       groups_for_extras: [
