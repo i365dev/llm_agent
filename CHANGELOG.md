@@ -7,18 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Comprehensive documentation structure with guides
-- Examples demonstrating various agent patterns
-- CI/CD workflows for automated testing and releases
-- Enhanced mix.exs configuration for better docs
-
-### Fixed
-- Compilation errors in AgentForge flow functions
-- Undefined variable 'i' in doctest examples
-- Refactored task_flow and batch_processing functions
-
-## [0.0.1] - 2025-03-27
+## [0.1.0] - 2025-03-28
 
 ### Added
 - Initial release of redesigned LLMAgent library
