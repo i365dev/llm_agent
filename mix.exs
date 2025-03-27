@@ -2,7 +2,7 @@ defmodule LLMAgent.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/i365dev/llm_agent"
-  @version "0.0.1"
+  @version "0.1.0"
 
   def project do
     [
@@ -45,7 +45,7 @@ defmodule LLMAgent.MixProject do
   # Run "mix help deps" to learn about dependencies
   defp deps do
     [
-      {:agent_forge, "~> 0.2.0"},
+      {:agent_forge, "~> 0.2.1"},
       {:jason, "~> 1.4"},
       {:openai, "~> 0.5.2"},
       {:anthropic, "~> 0.1.0"},
