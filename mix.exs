@@ -68,7 +68,7 @@ defmodule LLMAgent.MixProject do
     [
       main: "readme",
       extras:
-        ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"] ++
+        ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "LICENSE"] ++
           Path.wildcard("guides/*.md"),
       source_url: @source_url,
       formatters: ["html"],
