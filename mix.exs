@@ -2,7 +2,7 @@ defmodule LLMAgent.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/i365dev/llm_agent"
-  @version "3.0.0"
+  @version "0.0.1"
 
   def project do
     [
