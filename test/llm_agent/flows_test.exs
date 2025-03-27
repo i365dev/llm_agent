@@ -91,7 +91,7 @@ defmodule LLMAgent.FlowsTest do
       assert is_function(flow, 2)
 
       # For this test, we'll just verify we got a valid flow
-      # Testing the actual batch processing would require more complex 
+      # Testing the actual batch processing would require more complex
       # state handling and mocking
       assert is_function(flow, 2)
     end

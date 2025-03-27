@@ -110,7 +110,7 @@ defmodule LLMAgent do
   """
   def process(flow, state, message, options \\ []) do
     signal = LLMAgent.Signals.user_message(message)
-    timeout = Keyword.get(options, :timeout_ms, 30000)
+    timeout = Keyword.get(options, :timeout, 30_000)
 
     AgentForge.Flow.process_with_limits(flow, signal, state, timeout_ms: timeout)
   end

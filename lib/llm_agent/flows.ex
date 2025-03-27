@@ -7,7 +7,7 @@ defmodule LLMAgent.Flows do
   appropriate handlers, and configures initial state.
   """
 
-  alias LLMAgent.{Store, Handlers, Signals}
+  alias LLMAgent.{Handlers, Signals, Store}
 
   @doc """
   Creates a standard conversation flow with the given system prompt and tools.
@@ -82,7 +82,7 @@ defmodule LLMAgent.Flows do
   """
   def task_flow(task_definition, options \\ []) do
     # Extract options
-    _timeout_ms = Keyword.get(options, :timeout_ms, 60000)
+    _task_timeout = Keyword.get(options, :task_timeout, 60_000)
 
     # Create flow
     fn signal, state ->

@@ -6,6 +6,8 @@ defmodule LLMAgent.Providers.Anthropic do
   API calls, response parsing, and error handling specific to Anthropic's API.
   """
 
+  alias LLMAgent.Providers.OpenAI
+
   @doc """
   Makes an Anthropic chat completion API call.
 
@@ -19,44 +21,38 @@ defmodule LLMAgent.Providers.Anthropic do
   - `{:error, reason}` - On failure, returns the error reason
   """
   def completion(params) do
-    try do
-      api_key = Map.get(params, :api_key) || System.get_env("ANTHROPIC_API_KEY")
+    api_key = Map.get(params, :api_key) || System.get_env("ANTHROPIC_API_KEY")
 
-      # If no API key, return error
-      if is_nil(api_key) do
-        {:error, "Missing Anthropic API key"}
-      else
-        # Extract request parameters
-        messages = Map.get(params, :messages, [])
-        tools = Map.get(params, :tools, [])
-        model = Map.get(params, :model, "claude-3-opus-20240229")
+    # If no API key, return error
+    if is_nil(api_key) do
+      {:error, "Missing Anthropic API key"}
+    else
+      # Extract request parameters
+      messages = Map.get(params, :messages, [])
+      tools = Map.get(params, :tools, [])
+      model = Map.get(params, :model, "claude-3-opus-20240229")
 
-        # Format request body
-        request_body = %{
-          model: model,
-          messages: format_messages(messages),
-          temperature: Map.get(params, :temperature, 0.7),
-          max_tokens: Map.get(params, :max_tokens, 1000)
-        }
+      # Format request body
+      request_body = %{
+        model: model,
+        messages: format_messages(messages),
+        temperature: Map.get(params, :temperature, 0.7),
+        max_tokens: Map.get(params, :max_tokens, 1000)
+      }
 
-        # Add tools if provided
-        request_body =
-          if length(tools) > 0 do
-            Map.put(request_body, :tools, format_tools(tools))
-          else
-            request_body
-          end
+      # Add tools if provided
+      request_body =
+        if length(tools) > 0 do
+          Map.put(request_body, :tools, format_tools(tools))
+        else
+          request_body
+        end
 
-        # Mock Anthropic API response
-        response = mock_anthropic_response(request_body)
+      # Mock Anthropic API response
+      response = mock_anthropic_response(request_body)
 
-        # Parse response
-        parsed_response = parse_anthropic_response(response)
-        {:ok, parsed_response}
-      end
-    rescue
-      e ->
-        {:error, "Error processing Anthropic request: #{inspect(e)}"}
+      # Parse response
+      {:ok, parse_anthropic_response(response)}
     end
   end
 
@@ -93,7 +89,7 @@ defmodule LLMAgent.Providers.Anthropic do
     case provider do
       :openai ->
         # Delegate to OpenAI embedding
-        LLMAgent.Providers.OpenAI.embedding(params)
+        OpenAI.embedding(params)
 
       _ ->
         # Return mock embeddings if no valid provider is specified
@@ -186,33 +182,29 @@ defmodule LLMAgent.Providers.Anthropic do
   end
 
   defp parse_anthropic_response(response) do
-    # Extract the relevant parts of the Anthropic response
-
-    # Get the content parts
-    content_parts = get_in(response, [:content]) || []
-
-    # Check if the response contains tool calls
-    tool_calls = get_in(response, [:tool_use]) || []
-
-    if length(tool_calls) > 0 do
-      # Parse tool calls
-      parsed_tool_calls =
-        Enum.map(tool_calls, fn tool_call ->
+    case response do
+      %{content: content} = resp when is_list(content) ->
+        # 检查是否有工具调用
+        if Map.has_key?(resp, :tool_calls) and length(resp.tool_calls) > 0 do
+          # 包含工具调用的响应
           %{
-            id: tool_call.id || "tool-#{System.unique_integer([:positive])}",
-            name: tool_call.name,
-            arguments: parse_tool_arguments(tool_call.input)
+            content: extract_text_content(content),
+            tool_calls: resp.tool_calls
           }
-        end)
+        else
+          # 普通文本响应
+          %{
+            content: extract_text_content(content),
+            tool_calls: []
+          }
+        end
 
-      # Extract text content
-      text_content = extract_text_content(content_parts)
-
-      %{content: text_content, tool_calls: parsed_tool_calls}
-    else
-      # Regular response, just extract the text
-      text_content = extract_text_content(content_parts)
-      %{content: text_content, tool_calls: []}
+      _ ->
+        # 处理其他类型的响应或错误
+        %{
+          content: "Unable to parse response",
+          tool_calls: []
+        }
     end
   end
 
@@ -220,26 +212,7 @@ defmodule LLMAgent.Providers.Anthropic do
     # Combine all text parts into a single string
     content_parts
     |> Enum.filter(fn part -> part.type == "text" end)
-    |> Enum.map(fn part -> part.text end)
-    |> Enum.join("\n")
-  end
-
-  defp parse_tool_arguments(arguments) when is_map(arguments) do
-    # Arguments are already a map in Anthropic's format
-    arguments
-  end
-
-  defp parse_tool_arguments(arguments) when is_binary(arguments) do
-    # Parse JSON arguments if they're a string
-    case Jason.decode(arguments) do
-      {:ok, parsed} -> parsed
-      {:error, _} -> %{raw_arguments: arguments}
-    end
-  end
-
-  defp parse_tool_arguments(arguments) do
-    # Fallback for other formats
-    %{raw_arguments: inspect(arguments)}
+    |> Enum.map_join("\n", fn part -> part.text end)
   end
 
   # Mock implementations for when Anthropic module is not available
@@ -271,7 +244,16 @@ defmodule LLMAgent.Providers.Anthropic do
         usage: %{
           input_tokens: 100,
           output_tokens: 100
-        }
+        },
+        tool_calls: [
+          %{
+            id: "tool_use_mock-id",
+            name: "get_current_weather",
+            arguments: %{
+              location: "San Francisco, CA"
+            }
+          }
+        ]
       }
     else
       # Mock a standard response

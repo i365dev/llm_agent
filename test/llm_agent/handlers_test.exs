@@ -119,7 +119,7 @@ defmodule LLMAgent.HandlersTest do
       # Test
       {result, _updated_state} = Handlers.response_handler(signal, state)
 
-      # Based on implementation, response_handler returns a halt signal 
+      # Based on implementation, response_handler returns a halt signal
       # with formatted response, without changing the state
       assert is_tuple(result)
       assert elem(result, 0) == :halt

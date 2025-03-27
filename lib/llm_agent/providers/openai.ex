@@ -34,65 +34,75 @@ defmodule LLMAgent.Providers.OpenAI do
       true
   """
   def completion(params) do
-    try do
-      api_key = Map.get(params, :api_key) || System.get_env("OPENAI_API_KEY")
+    api_key = Map.get(params, :api_key) || System.get_env("OPENAI_API_KEY")
 
-      # If no API key, return error
-      if is_nil(api_key) do
-        {:error,
-         %{
-           message: "Missing OpenAI API key",
-           source: "openai_provider",
-           context: %{params: params}
-         }}
-      else
-        # Extract request parameters
-        messages = Map.get(params, :messages, [])
-        tools = Map.get(params, :tools, [])
-        model = Map.get(params, :model, "gpt-4")
-        max_retries = Map.get(params, :max_retries, 3)
+    # If no API key, return error
+    if is_nil(api_key) do
+      {:error,
+       %{
+         message: "Missing OpenAI API key",
+         source: "openai_provider",
+         context: %{params: params}
+       }}
+    else
+      # Extract request parameters
+      messages = Map.get(params, :messages, [])
+      tools = Map.get(params, :tools, [])
+      model = Map.get(params, :model, "gpt-4")
+      max_retries = Map.get(params, :max_retries, 3)
 
-        # Format request body
-        request_body = %{
-          model: model,
-          messages: format_messages(messages),
-          temperature: Map.get(params, :temperature, 0.7)
-        }
+      # Format request body
+      request_body = %{
+        model: model,
+        messages: format_messages(messages),
+        temperature: Map.get(params, :temperature, 0.7)
+      }
 
-        # Add tools if provided
-        request_body =
-          if length(tools) > 0 do
-            Map.put(request_body, :tools, format_tools(tools))
-          else
-            request_body
-          end
-
-        # Call API with retry logic
-        call_with_retry(
-          fn ->
-            # In a real implementation, this would be an HTTP call to OpenAI
-            # For now, we're using a mock
-            mock_openai_response(request_body)
-          end,
-          max_retries
-        )
-        |> case do
-          {:ok, response} ->
-            parsed_response = parse_openai_response(response)
-            {:ok, parsed_response}
-
-          {:error, reason} ->
-            {:error, %{message: reason, source: "openai_provider", context: %{model: model}}}
+      # Add tools if provided
+      request_body =
+        if length(tools) > 0 do
+          Map.merge(request_body, %{
+            tools: format_tools(tools),
+            tool_choice: "auto"
+          })
+        else
+          request_body
         end
+
+      # Make API call with retry logic
+      call_with_retry(
+        fn ->
+          OpenAI.chat_completion(
+            request_body,
+            api_key: api_key,
+            http_options: [recv_timeout: 60_000]
+          )
+        end,
+        max_retries
+      )
+      |> case do
+        {:ok, response} ->
+          # Parse response
+          parse_openai_response(response, tools)
+
+        {:error, %{status: status, body: body}} ->
+          # Format error from HTTP response
+          {:error,
+           %{
+             message: "OpenAI API error: #{inspect(body)}",
+             source: "openai_provider",
+             context: %{status: status, body: body}
+           }}
+
+        {:error, reason} ->
+          # Format other errors
+          {:error,
+           %{
+             message: "OpenAI API error: #{inspect(reason)}",
+             source: "openai_provider",
+             context: %{reason: reason}
+           }}
       end
-    rescue
-      e ->
-        {:error,
-         %{
-           message: "Unexpected error processing OpenAI request",
-           source: "openai_provider",
-           context: %{error: Exception.message(e), stacktrace: __STACKTRACE__}
-         }}
     end
   end
 
@@ -120,66 +130,71 @@ defmodule LLMAgent.Providers.OpenAI do
       true
   """
   def embedding(params) do
-    try do
-      api_key = Map.get(params, :api_key) || System.get_env("OPENAI_API_KEY")
+    api_key = Map.get(params, :api_key) || System.get_env("OPENAI_API_KEY")
 
-      # If no API key, return error
-      if is_nil(api_key) do
-        {:error,
-         %{
-           message: "Missing OpenAI API key",
-           source: "openai_provider",
-           context: %{params: params}
-         }}
-      else
-        # Extract request parameters
-        input = Map.get(params, :input)
-        model = Map.get(params, :model, "text-embedding-ada-002")
-        max_retries = Map.get(params, :max_retries, 3)
+    # If no API key, return error
+    if is_nil(api_key) do
+      {:error,
+       %{
+         message: "Missing OpenAI API key",
+         source: "openai_provider",
+         context: %{params: params}
+       }}
+    else
+      # Extract request parameters
+      input = Map.get(params, :input)
+      model = Map.get(params, :model, "text-embedding-ada-002")
+      max_retries = Map.get(params, :max_retries, 3)
 
-        # Format request body
-        request_body = %{
-          model: model,
-          input: input
-        }
+      # Format request body
+      request_body = %{
+        model: model,
+        input: input
+      }
 
-        # Call API with retry logic
+      # Make API call with retry logic
+      response_result =
         call_with_retry(
           fn ->
-            # In a real implementation, this would be an HTTP call to OpenAI
-            # For now, we're using a mock
+            # 在实际实现中使用真实的 API 调用，现在使用模拟响应
             mock_openai_embedding_response(request_body)
           end,
           max_retries
         )
-        |> case do
-          {:ok, response} ->
-            case response do
-              %{data: embeddings} ->
-                {:ok, embeddings}
 
-              _ ->
-                {:error,
-                 %{
-                   message: "Invalid embedding response format",
-                   source: "openai_provider",
-                   context: %{response: response}
-                 }}
-            end
-
-          {:error, reason} ->
-            {:error, %{message: reason, source: "openai_provider", context: %{model: model}}}
-        end
-      end
-    rescue
-      e ->
-        {:error,
-         %{
-           message: "Unexpected error processing OpenAI embedding request",
-           source: "openai_provider",
-           context: %{error: Exception.message(e), stacktrace: __STACKTRACE__}
-         }}
+      # 处理响应结果
+      handle_embedding_response(response_result)
     end
+  end
+
+  # 提取嵌套处理逻辑到单独函数
+  defp handle_embedding_response({:ok, response}) do
+    # 进一步处理成功响应
+    extract_embeddings(response)
+  end
+
+  defp handle_embedding_response({:error, %{status: status, body: body}}) do
+    # 格式化 HTTP 错误
+    {:error,
+     %{
+       message: "OpenAI API error: #{inspect(body)}",
+       source: "openai_provider",
+       context: %{status: status, body: body}
+     }}
+  end
+
+  # 提取嵌入向量
+  defp extract_embeddings(%{data: embeddings}) do
+    {:ok, embeddings}
+  end
+
+  defp extract_embeddings(response) do
+    {:error,
+     %{
+       message: "Invalid embedding response format",
+       source: "openai_provider",
+       context: %{response: response}
+     }}
   end
 
   # Private functions
@@ -238,35 +253,43 @@ defmodule LLMAgent.Providers.OpenAI do
     end
   end
 
-  defp parse_openai_response(response) do
+  defp parse_openai_response(response, _tools) do
     # Extract the relevant parts of the OpenAI response
     choice = List.first(response.choices)
 
+    # 提前返回，避免嵌套
     if is_nil(choice) do
       %{content: nil, tool_calls: []}
     else
-      message = choice.message
-
-      # Check if the response contains tool calls
-      tool_calls = Map.get(message, :tool_calls, [])
-
-      if length(tool_calls) > 0 do
-        # Parse tool calls
-        parsed_tool_calls =
-          Enum.map(tool_calls, fn tool_call ->
-            %{
-              id: tool_call.id,
-              name: tool_call.function.name,
-              arguments: parse_tool_arguments(tool_call.function.arguments)
-            }
-          end)
-
-        %{content: message.content, tool_calls: parsed_tool_calls}
-      else
-        # Regular response
-        %{content: message.content, tool_calls: []}
-      end
+      parse_choice(choice)
     end
+  end
+
+  # 提取出嵌套逻辑到单独的函数
+  defp parse_choice(choice) do
+    message = choice.message
+    tool_calls = Map.get(message, :tool_calls, [])
+
+    # 提取内容总是需要的
+    content = message.content
+
+    # 处理工具调用
+    parsed_tool_calls = parse_tool_calls(tool_calls)
+
+    %{content: content, tool_calls: parsed_tool_calls}
+  end
+
+  # 工具调用解析为单独函数
+  defp parse_tool_calls([]), do: []
+
+  defp parse_tool_calls(tool_calls) do
+    Enum.map(tool_calls, fn tool_call ->
+      %{
+        id: tool_call.id,
+        name: tool_call.function.name,
+        arguments: parse_tool_arguments(tool_call.function.arguments)
+      }
+    end)
   end
 
   defp parse_tool_arguments(arguments) do
@@ -277,112 +300,31 @@ defmodule LLMAgent.Providers.OpenAI do
     end
   end
 
-  # Mock OpenAI response for testing purposes
-  defp mock_openai_response(request_body) do
-    # Check if tools were requested
-    tools = Map.get(request_body, :tools, [])
-
-    if length(tools) > 0 do
-      # Mock a tool call response
-      %{
-        id: "mock-completion-id",
-        object: "chat.completion",
-        created: :os.system_time(:second),
-        model: Map.get(request_body, :model),
-        choices: [
-          %{
-            index: 0,
-            message: %{
-              role: "assistant",
-              content: nil,
-              tool_calls: [
-                %{
-                  id: "mock-tool-call-id",
-                  type: "function",
-                  function: %{
-                    name: "get_current_weather",
-                    arguments: "{\"location\":\"San Francisco, CA\"}"
-                  }
-                }
-              ]
-            },
-            finish_reason: "tool_calls"
-          }
-        ],
-        usage: %{
-          prompt_tokens: 100,
-          completion_tokens: 100,
-          total_tokens: 200
-        }
-      }
-    else
-      # Mock a standard response
-      %{
-        id: "mock-completion-id",
-        object: "chat.completion",
-        created: :os.system_time(:second),
-        model: Map.get(request_body, :model),
-        choices: [
-          %{
-            index: 0,
-            message: %{
-              role: "assistant",
-              content: "This is a mock response from the OpenAI API."
-            },
-            finish_reason: "stop"
-          }
-        ],
-        usage: %{
-          prompt_tokens: 100,
-          completion_tokens: 100,
-          total_tokens: 200
-        }
-      }
-    end
-  end
-
-  # Mock OpenAI embedding response for testing purposes
   defp mock_openai_embedding_response(_request_body) do
-    %{
-      object: "list",
-      data: [
-        %{
-          object: "embedding",
-          embedding: Enum.map(1..1536, fn _ -> :rand.uniform() end),
-          index: 0
-        }
-      ],
-      model: "text-embedding-ada-002",
-      usage: %{
-        prompt_tokens: 8,
-        total_tokens: 8
-      }
-    }
+    # 模拟 OpenAI 嵌入式响应
+    {:ok, %{data: [%{embedding: [1.0, 2.0, 3.0]}]}}
   end
 
   # Retry logic for API calls with exponential backoff
   defp call_with_retry(func, max_retries, current_retry \\ 0) do
-    try do
-      result = func.()
-      {:ok, result}
-    rescue
-      e ->
-        error_message = Exception.message(e)
+    func.()
+  rescue
+    e ->
+      error_message = Exception.message(e)
 
-        # Check if this is a rate limit error or server error
-        is_retryable =
-          String.contains?(error_message, "rate limit") or
-            String.contains?(error_message, "server error") or
-            String.contains?(error_message, "too many requests")
+      # Check if this is a rate limit error or server error
+      is_retryable =
+        String.contains?(error_message, "rate limit") or
+          String.contains?(error_message, "server error") or
+          String.contains?(error_message, "too many requests")
 
-        if is_retryable and current_retry < max_retries do
-          # Exponential backoff: 2^n * 100ms + random jitter
-          backoff_ms = :math.pow(2, current_retry) * 100 + :rand.uniform(100)
-          Process.sleep(trunc(backoff_ms))
-          call_with_retry(func, max_retries, current_retry + 1)
-        else
-          {:error, error_message}
-        end
-    end
+      if is_retryable and current_retry < max_retries do
+        # Exponential backoff: 2^n * 100ms + random jitter
+        backoff_ms = :math.pow(2, current_retry) * 100 + :rand.uniform(100)
+        Process.sleep(trunc(backoff_ms))
+        call_with_retry(func, max_retries, current_retry + 1)
+      else
+        {:error, error_message}
+      end
   end
 end
