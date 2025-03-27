@@ -43,8 +43,7 @@ defmodule LLMAgent.MixProject do
   defp aliases do
     [
       test: ["test"],
-      lint: ["format", "credo --strict"],
-      docs: ["docs"]
+      lint: ["format", "credo --strict"]
     ]
   end
 
