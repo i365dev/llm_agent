@@ -43,5 +43,7 @@ jobs:
       - name: Run Credo
         run: mix credo --strict
         
-      - name: Generate documentation
-        run: mix docs
+      - name: Code Coverage
+        run: mix coveralls.github
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
