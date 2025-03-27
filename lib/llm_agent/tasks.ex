@@ -354,22 +354,20 @@ defmodule LLMAgent.Tasks do
 
   defp execute_task_with_stages(task_flow, signal, task_state, timeout_ms) do
     # Similar to collect_stage_results but simpler for synchronous execution
-    try do
-      {results, states} = collect_stage_results(task_flow, signal, task_state, timeout_ms)
-      final_result = List.last(results)
-      final_state = List.last(states)
+    {results, states} = collect_stage_results(task_flow, signal, task_state, timeout_ms)
+    final_result = List.last(results)
+    final_state = List.last(states)
 
-      case final_result[:status] do
-        "completed" ->
-          {:ok, final_result[:result], results, final_state}
+    case final_result[:status] do
+      "completed" ->
+        {:ok, final_result[:result], results, final_state}
 
-        "error" ->
-          {:error, final_result[:error], final_result[:name], final_state}
-      end
-    catch
-      kind, error ->
-        error_msg = Exception.format(kind, error, __STACKTRACE__)
-        {:error, error_msg, task_state.task_stage, task_state}
+      "error" ->
+        {:error, final_result[:error], final_result[:name], final_state}
     end
+  catch
+    kind, error ->
+      error_msg = Exception.format(kind, error, __STACKTRACE__)
+      {:error, error_msg, task_state.task_stage, task_state}
   end
 end

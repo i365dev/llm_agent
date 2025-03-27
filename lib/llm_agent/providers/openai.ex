@@ -531,26 +531,24 @@ defmodule LLMAgent.Providers.OpenAI do
 
   # Retry mechanism for API calls
   defp call_with_retry(api_call, max_retries, current_retry \\ 0, backoff_ms \\ 1000) do
-    try do
-      api_call.()
-    rescue
-      e ->
-        if current_retry < max_retries do
-          # Exponential backoff with jitter
-          jitter = :rand.uniform(div(backoff_ms, 4))
-          wait_time = backoff_ms + jitter
+    api_call.()
+  rescue
+    e ->
+      if current_retry < max_retries do
+        # Exponential backoff with jitter
+        jitter = :rand.uniform(div(backoff_ms, 4))
+        wait_time = backoff_ms + jitter
 
-          Logger.warning(
-            "API call failed, retrying (#{current_retry + 1}/#{max_retries}) after #{wait_time}ms: #{Exception.message(e)}"
-          )
+        Logger.warning(
+          "API call failed, retrying (#{current_retry + 1}/#{max_retries}) after #{wait_time}ms: #{Exception.message(e)}"
+        )
 
-          :timer.sleep(wait_time)
-          call_with_retry(api_call, max_retries, current_retry + 1, backoff_ms * 2)
-        else
-          Logger.error("API call failed after #{max_retries} retries: #{Exception.message(e)}")
-          {:error, %{message: Exception.message(e), exception: e}}
-        end
-    end
+        :timer.sleep(wait_time)
+        call_with_retry(api_call, max_retries, current_retry + 1, backoff_ms * 2)
+      else
+        Logger.error("API call failed after #{max_retries} retries: #{Exception.message(e)}")
+        {:error, %{message: Exception.message(e), exception: e}}
+      end
   end
 
   # Mock responses for testing and development

@@ -380,45 +380,61 @@ defmodule LLMAgent.Handlers do
   defp validate_tool_parameters(args, schema) do
     # Implementation of JSON Schema validation
     # This is a simplified version, in production would use a proper validator
-    try do
-      # Check required fields
-      required = Map.get(schema, "required", [])
-      missing_fields = Enum.filter(required, fn field -> is_nil(Map.get(args, field)) end)
+    with {:ok, _} <- validate_required_fields(args, schema),
+         {:ok, _} <- validate_field_types(args, schema) do
+      {:ok, args}
+    end
+  rescue
+    e -> {:error, %{validation_error: Exception.message(e)}}
+  end
 
-      if length(missing_fields) > 0 do
-        {:error, %{missing_required: missing_fields}}
+  # Validate that all required fields are present
+  defp validate_required_fields(args, schema) do
+    required = Map.get(schema, "required", [])
+    missing_fields = Enum.filter(required, fn field -> is_nil(Map.get(args, field)) end)
+
+    if length(missing_fields) > 0 do
+      {:error, %{missing_required: missing_fields}}
+    else
+      {:ok, args}
+    end
+  end
+
+  # Validate field types against schema
+  defp validate_field_types(args, schema) do
+    properties = Map.get(schema, "properties", %{})
+    validation_errors = check_field_types(args, properties)
+
+    if map_size(validation_errors) > 0 do
+      {:error, %{type_mismatch: validation_errors}}
+    else
+      {:ok, args}
+    end
+  end
+
+  # Helper to check types of all fields
+  defp check_field_types(args, properties) do
+    Enum.reduce(properties, %{}, fn {field, field_schema}, errors ->
+      value = Map.get(args, field)
+
+      if is_nil(value) do
+        # Skip validation for optional fields that are not provided
+        errors
       else
-        # Validate types if properties defined
-        properties = Map.get(schema, "properties", %{})
-
-        validation_errors =
-          Enum.reduce(properties, %{}, fn {field, field_schema}, errors ->
-            value = Map.get(args, field)
-
-            if is_nil(value) do
-              # Skip validation for optional fields that are not provided
-              errors
-            else
-              # Validate field type
-              expected_type = Map.get(field_schema, "type")
-              actual_type = determine_json_type(value)
-
-              if expected_type != actual_type do
-                Map.put(errors, field, "expected #{expected_type}, got #{actual_type}")
-              else
-                errors
-              end
-            end
-          end)
-
-        if map_size(validation_errors) > 0 do
-          {:error, %{type_mismatch: validation_errors}}
-        else
-          {:ok, args}
-        end
+        validate_field_type(field, field_schema, value, errors)
       end
-    rescue
-      e -> {:error, %{validation_error: Exception.message(e)}}
+    end)
+  end
+
+  # Validate individual field type
+  defp validate_field_type(field, field_schema, value, errors) do
+    expected_type = Map.get(field_schema, "type")
+    actual_type = determine_json_type(value)
+
+    if expected_type != actual_type do
+      Map.put(errors, field, "expected #{expected_type}, got #{actual_type}")
+    else
+      errors
     end
   end
 
