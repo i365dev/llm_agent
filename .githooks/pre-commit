@@ -1,0 +1,29 @@
+#!/bin/sh
+
+# Store files that are about to be committed
+staged_files=$(git diff --cached --name-only --diff-filter=d | grep .ex$)
+
+if [ -n "$staged_files" ]; then
+    echo "Running mix format on staged Elixir files..."
+    
+    # Run mix format
+    mix format
+
+    # Add the formatted files back to staging
+    echo "$staged_files" | while read file; do
+        if [ -f "$file" ]; then
+            git add "$file"
+        fi
+    done
+fi
+
+# Run format check to ensure everything is formatted
+mix format --check-formatted
+if [ $? -ne 0 ]; then
+    echo "❌ Code must be properly formatted before committing."
+    echo "Please stage the formatting changes and try again."
+    exit 1
+fi
+
+echo "✅ Code formatting check passed."
+exit 0
