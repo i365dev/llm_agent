@@ -205,10 +205,16 @@ end
 
 ## Additional Documentation
 
-- [API Reference](https://hexdocs.pm/llm_agent/api-reference.html)
+- [Getting Started Guide](https://hexdocs.pm/llm_agent/getting_started.html)
 - [Architecture Guide](https://hexdocs.pm/llm_agent/architecture.html)
-- [Plugin System](https://hexdocs.pm/llm_agent/plugin_system.html)
+- [Tool Integration](https://hexdocs.pm/llm_agent/tool_integration.html)
+- [Custom Agents](https://hexdocs.pm/llm_agent/custom_agents.html)
+- [API Reference](https://hexdocs.pm/llm_agent/api-reference.html)
+
+## Contributing
+
+We welcome contributions from the community! Please see our [Contributing Guide](CONTRIBUTING.md) for more information on how to get involved.
 
 ## License
 
-LLMAgent is released under the MIT License. See the LICENSE file for details.
+LLMAgent is released under the MIT License. See the [LICENSE](LICENSE) file for details.
