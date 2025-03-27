@@ -267,4 +267,143 @@ defmodule LLMAgent.Store do
     |> Map.get(:preferences, %{})
     |> Map.get(key, default)
   end
+
+  @doc """
+  Gets all preferences from the state.
+
+  ## Parameters
+
+  - `state` - The current store state
+
+  ## Returns
+
+  A map of preferences.
+
+  ## Examples
+
+      iex> state = LLMAgent.Store.new(%{preferences: %{theme: "dark"}})
+      iex> LLMAgent.Store.get_preferences(state)
+      %{theme: "dark"}
+  """
+  def get_preferences(state) do
+    Map.get(state, :preferences, %{})
+  end
+
+  @doc """
+  Trims history to a maximum number of entries while preserving system messages.
+
+  This function is useful for managing memory usage in long conversations.
+  System messages are always preserved, and the most recent user/assistant 
+  messages are kept up to the specified limit.
+
+  ## Parameters
+
+  - `state` - The current store state
+  - `max_entries` - The maximum number of entries to keep (default: 50)
+
+  ## Returns
+
+  An updated state with trimmed history.
+
+  ## Examples
+
+      iex> state = LLMAgent.Store.new()
+      iex> state = LLMAgent.Store.add_message(state, "system", "You are an assistant")
+      iex> # Add many user/assistant message pairs to exceed the limit
+      iex> state = Enum.reduce(1..60, state, fn n, acc -> 
+      ...>   acc = LLMAgent.Store.add_message(acc, "user", "Message " <> Integer.to_string(n))
+      ...>   LLMAgent.Store.add_message(acc, "assistant", "Response " <> Integer.to_string(n))
+      ...> end)
+      iex> trimmed_state = LLMAgent.Store.trim_history(state)
+      iex> length(trimmed_state.history) <= 51  # 50 + 1 system message
+      true
+      iex> # Verify system message is preserved
+      iex> Enum.any?(trimmed_state.history, fn msg -> msg.role == "system" end)
+      true
+  """
+  def trim_history(state, max_entries \\ 50) do
+    history = Map.get(state, :history, [])
+
+    if length(history) > max_entries do
+      # Separate system messages and other messages
+      {system_messages, other_messages} =
+        Enum.split_with(history, fn msg -> msg.role == "system" end)
+
+      # Keep the most recent messages up to the limit
+      recent_messages =
+        other_messages
+        |> Enum.reverse()
+        |> Enum.take(max_entries - length(system_messages))
+        |> Enum.reverse()
+
+      # Create new history with system messages first followed by recent messages
+      Map.put(state, :history, system_messages ++ recent_messages)
+    else
+      state
+    end
+  end
+
+  @doc """
+  Prunes the thoughts list to a maximum size to prevent memory bloat.
+
+  ## Parameters
+
+  - `state` - The current store state
+  - `max_thoughts` - The maximum number of thoughts to keep (default: 20)
+
+  ## Returns
+
+  An updated state with pruned thoughts.
+
+  ## Examples
+
+      iex> state = LLMAgent.Store.new()
+      iex> state = Enum.reduce(1..30, state, fn n, acc -> LLMAgent.Store.add_thought(acc, "Thought " <> Integer.to_string(n)) end)
+      iex> pruned_state = LLMAgent.Store.prune_thoughts(state)
+      iex> length(pruned_state.thoughts) <= 20
+      true
+  """
+  def prune_thoughts(state, max_thoughts \\ 20) do
+    thoughts = Map.get(state, :thoughts, [])
+
+    if length(thoughts) > max_thoughts do
+      # Keep the most recent thoughts
+      recent_thoughts = thoughts |> Enum.reverse() |> Enum.take(max_thoughts) |> Enum.reverse()
+      Map.put(state, :thoughts, recent_thoughts)
+    else
+      state
+    end
+  end
+
+  @doc """
+  Optimizes the state by trimming history and pruning thoughts.
+
+  This is a utility function that combines trim_history and prune_thoughts
+  to optimize the entire state at once.
+
+  ## Parameters
+
+  - `state` - The current store state
+  - `options` - Options including :max_history and :max_thoughts
+
+  ## Returns
+
+  An optimized state.
+
+  ## Examples
+
+      iex> state = LLMAgent.Store.new()
+      iex> # Add lots of history and thoughts
+      iex> optimized_state = LLMAgent.Store.optimize(state, max_history: 30, max_thoughts: 10)
+      iex> is_map(optimized_state)
+      true
+  """
+  def optimize(state, options \\ []) do
+    max_history = Keyword.get(options, :max_history, 50)
+    max_thoughts = Keyword.get(options, :max_thoughts, 20)
+
+    state
+    |> trim_history(max_history)
+    |> prune_thoughts(max_thoughts)
+  end
 end

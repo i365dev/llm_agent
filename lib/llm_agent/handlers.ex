@@ -199,7 +199,7 @@ defmodule LLMAgent.Handlers do
         end
 
       {:error, reason} ->
-        error_signal = Signals.error(reason, tool_name)
+        error_signal = Signals.error("Tool not found: #{reason}", tool_name)
         {{:emit, error_signal}, state}
     end
   end
@@ -251,8 +251,8 @@ defmodule LLMAgent.Handlers do
 
         {{:emit, thinking_signal}, new_state}
 
-      {:tool_call, next_tool, args} ->
-        tool_signal = Signals.tool_call(next_tool, args)
+      {:tool_call, tool, args} ->
+        tool_signal = Signals.tool_call(tool, args)
         {{:emit, tool_signal}, state}
 
       {:response, content} ->

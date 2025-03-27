@@ -39,12 +39,18 @@ defmodule LLMAgent.Providers.OpenAI do
 
       # If no API key, return error
       if is_nil(api_key) do
-        {:error, "Missing OpenAI API key"}
+        {:error,
+         %{
+           message: "Missing OpenAI API key",
+           source: "openai_provider",
+           context: %{params: params}
+         }}
       else
         # Extract request parameters
         messages = Map.get(params, :messages, [])
         tools = Map.get(params, :tools, [])
         model = Map.get(params, :model, "gpt-4")
+        max_retries = Map.get(params, :max_retries, 3)
 
         # Format request body
         request_body = %{
@@ -61,16 +67,32 @@ defmodule LLMAgent.Providers.OpenAI do
             request_body
           end
 
-        # Mock OpenAI API response
-        response = mock_openai_response(request_body)
+        # Call API with retry logic
+        call_with_retry(
+          fn ->
+            # In a real implementation, this would be an HTTP call to OpenAI
+            # For now, we're using a mock
+            mock_openai_response(request_body)
+          end,
+          max_retries
+        )
+        |> case do
+          {:ok, response} ->
+            parsed_response = parse_openai_response(response)
+            {:ok, parsed_response}
 
-        # Parse response
-        parsed_response = parse_openai_response(response)
-        {:ok, parsed_response}
+          {:error, reason} ->
+            {:error, %{message: reason, source: "openai_provider", context: %{model: model}}}
+        end
       end
     rescue
       e ->
-        {:error, "Error processing OpenAI request: #{inspect(e)}"}
+        {:error,
+         %{
+           message: "Unexpected error processing OpenAI request",
+           source: "openai_provider",
+           context: %{error: Exception.message(e), stacktrace: __STACKTRACE__}
+         }}
     end
   end
 
@@ -103,11 +125,17 @@ defmodule LLMAgent.Providers.OpenAI do
 
       # If no API key, return error
       if is_nil(api_key) do
-        {:error, "Missing OpenAI API key"}
+        {:error,
+         %{
+           message: "Missing OpenAI API key",
+           source: "openai_provider",
+           context: %{params: params}
+         }}
       else
         # Extract request parameters
         input = Map.get(params, :input)
         model = Map.get(params, :model, "text-embedding-ada-002")
+        max_retries = Map.get(params, :max_retries, 3)
 
         # Format request body
         request_body = %{
@@ -115,21 +143,42 @@ defmodule LLMAgent.Providers.OpenAI do
           input: input
         }
 
-        # Mock OpenAI embeddings response
-        response = mock_openai_embedding_response(request_body)
+        # Call API with retry logic
+        call_with_retry(
+          fn ->
+            # In a real implementation, this would be an HTTP call to OpenAI
+            # For now, we're using a mock
+            mock_openai_embedding_response(request_body)
+          end,
+          max_retries
+        )
+        |> case do
+          {:ok, response} ->
+            case response do
+              %{data: embeddings} ->
+                {:ok, embeddings}
 
-        # Parse response
-        case response do
-          %{data: embeddings} ->
-            {:ok, embeddings}
+              _ ->
+                {:error,
+                 %{
+                   message: "Invalid embedding response format",
+                   source: "openai_provider",
+                   context: %{response: response}
+                 }}
+            end
 
-          _ ->
-            {:error, "Invalid embedding response"}
+          {:error, reason} ->
+            {:error, %{message: reason, source: "openai_provider", context: %{model: model}}}
         end
       end
     rescue
       e ->
-        {:error, "Error processing OpenAI embedding request: #{inspect(e)}"}
+        {:error,
+         %{
+           message: "Unexpected error processing OpenAI embedding request",
+           source: "openai_provider",
+           context: %{error: Exception.message(e), stacktrace: __STACKTRACE__}
+         }}
     end
   end
 
@@ -309,5 +358,31 @@ defmodule LLMAgent.Providers.OpenAI do
         total_tokens: 8
       }
     }
+  end
+
+  # Retry logic for API calls with exponential backoff
+  defp call_with_retry(func, max_retries, current_retry \\ 0) do
+    try do
+      result = func.()
+      {:ok, result}
+    rescue
+      e ->
+        error_message = Exception.message(e)
+
+        # Check if this is a rate limit error or server error
+        is_retryable =
+          String.contains?(error_message, "rate limit") or
+            String.contains?(error_message, "server error") or
+            String.contains?(error_message, "too many requests")
+
+        if is_retryable and current_retry < max_retries do
+          # Exponential backoff: 2^n * 100ms + random jitter
+          backoff_ms = :math.pow(2, current_retry) * 100 + :rand.uniform(100)
+          Process.sleep(trunc(backoff_ms))
+          call_with_retry(func, max_retries, current_retry + 1)
+        else
+          {:error, error_message}
+        end
+    end
   end
 end
