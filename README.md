@@ -1,5 +1,10 @@
 # LLMAgent
 
+[![CI](https://github.com/i365dev/llm_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/i365dev/llm_agent/actions/workflows/ci.yml)
+[![Hex.pm](https://img.shields.io/hexpm/v/llm_agent.svg)](https://hex.pm/packages/llm_agent)
+[![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/llm_agent)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/i365dev/llm_agent/blob/main/LICENSE)
+
 LLMAgent is an abstraction library for building domain-specific intelligent agents based on Large Language Models (LLMs). Built on top of AgentForge's signal-driven architecture, LLMAgent provides specialized patterns for LLM-powered agents, including predefined signals, handlers, store structures, and flows optimized for conversational agents.
 
 ## Features

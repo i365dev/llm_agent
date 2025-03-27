@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    name: Publish to Hex.pm
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.14.x'
+          otp-version: '25.x'
+          
+      - name: Install dependencies
+        run: mix deps.get
+        
+      - name: Compile
+        run: mix compile --warnings-as-errors
+        
+      - name: Run tests
+        run: mix test
+        
+      - name: Generate documentation
+        run: mix docs
+        
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            LICENSE
+            README.md
+            CHANGELOG.md
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Publish to Hex.pm
+        run: mix hex.publish --yes
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}

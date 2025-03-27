@@ -5,7 +5,7 @@ defmodule LLMAgent.MixProject do
     [
       app: :llm_agent,
       version: "3.0.0",
-      elixir: "~> 1.14",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -51,8 +51,39 @@ defmodule LLMAgent.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md"],
-      formatters: ["html"]
+      extras: ["README.md", "CHANGELOG.md"] ++ Path.wildcard("guides/*.md"),
+      source_url: "https://github.com/i365dev/llm_agent",
+      formatters: ["html"],
+      groups_for_extras: [
+        "Guides": Path.wildcard("guides/*.md")
+      ],
+      groups_for_modules: [
+        "Core": [
+          LLMAgent,
+          LLMAgent.Signals,
+          LLMAgent.Handlers,
+          LLMAgent.Store,
+          LLMAgent.Flows
+        ],
+        "LLM Providers": [
+          LLMAgent.Providers.OpenAI,
+          LLMAgent.Providers.Anthropic
+        ],
+        "Plugins": [
+          LLMAgent.Plugin
+        ],
+        "Tasks": [
+          LLMAgent.Tasks
+        ]
+      ],
+      before_closing_body_tag: &before_closing_body_tag/1
     ]
+  end
+
+  defp before_closing_body_tag(:html) do
+    """
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@8.13.3/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({startOnLoad:true});</script>
+    """
   end
 end
