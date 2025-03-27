@@ -155,6 +155,7 @@ defmodule LLMAgent.Handlers do
   Handles tool call signals.
 
   Executes the specified tool with the provided arguments and generates a tool result signal.
+  Includes parameter validation based on tool schema and detailed error handling.
 
   ## Parameters
 
@@ -177,17 +178,150 @@ defmodule LLMAgent.Handlers do
     tool_name = signal.data.name
     tool_args = signal.data.args
 
-    # Get tool from AgentForge Tools registry
-    case AgentForge.Tools.get(tool_name) do
-      {:ok, tool_fn} ->
-        # Execute tool
+    Logger.info("Tool call: #{tool_name} with args: #{inspect(tool_args)}")
+
+    # Get tool registry from state or use default
+    tool_registry = Map.get(state, :tool_registry, &AgentForge.Tools.get/1)
+
+    # Get tool from registry
+    case tool_registry.(tool_name) do
+      {:ok, %{execute: tool_fn, parameters: params_schema} = tool} ->
+        # Validate parameters against schema if schema exists
+        validation_result =
+          if params_schema do
+            validate_tool_parameters(tool_args, params_schema)
+          else
+            {:ok, tool_args}
+          end
+
+        case validation_result do
+          {:ok, validated_args} ->
+            # Execute tool with validated args
+            try do
+              # Track start time for performance metrics
+              start_time = System.monotonic_time(:millisecond)
+
+              # Execute tool function
+              result = tool_fn.(validated_args)
+
+              # Calculate execution time
+              execution_time = System.monotonic_time(:millisecond) - start_time
+
+              # Create tool result signal with execution metadata
+              result_signal =
+                Signals.tool_result(
+                  tool_name,
+                  result,
+                  %{
+                    execution_time_ms: execution_time,
+                    tool_type: Map.get(tool, :type, "unknown")
+                  }
+                )
+
+              # Update state with detailed tool call information
+              new_state =
+                state
+                |> Store.add_tool_call(
+                  tool_name,
+                  validated_args,
+                  %{
+                    result: result,
+                    execution_time_ms: execution_time,
+                    status: "success",
+                    timestamp: DateTime.utc_now()
+                  }
+                )
+                |> Map.update(
+                  :execution_stats,
+                  %{tool_calls: 1, total_execution_time: execution_time},
+                  fn stats ->
+                    stats
+                    |> Map.update(:tool_calls, 1, &(&1 + 1))
+                    |> Map.update(:total_execution_time, execution_time, &(&1 + execution_time))
+                  end
+                )
+
+              {{:emit, result_signal}, new_state}
+            rescue
+              e ->
+                stack = __STACKTRACE__
+                error_message = Exception.message(e)
+
+                error_data = %{
+                  message: error_message,
+                  type: "execution_error",
+                  stacktrace: Enum.take(stack, 3),
+                  tool: tool_name,
+                  args: validated_args
+                }
+
+                # Log detailed error for debugging
+                Logger.error("Tool execution error: #{inspect(error_data)}")
+
+                # Create error signal with context
+                error_signal =
+                  Signals.error(
+                    error_message,
+                    tool_name,
+                    %{error_type: "execution_error", args: validated_args}
+                  )
+
+                # Update state with error information
+                new_state =
+                  Store.add_tool_call(
+                    state,
+                    tool_name,
+                    validated_args,
+                    %{
+                      error: error_message,
+                      status: "error",
+                      error_type: "execution_error"
+                    }
+                  )
+
+                {{:emit, error_signal}, new_state}
+            end
+
+          {:error, validation_errors} ->
+            # Parameter validation failed
+            error_message = "Invalid tool parameters: #{inspect(validation_errors)}"
+            Logger.warning(error_message)
+
+            # Create detailed error signal
+            error_signal =
+              Signals.error(
+                error_message,
+                tool_name,
+                %{
+                  error_type: "validation_error",
+                  args: tool_args,
+                  validation_errors: validation_errors,
+                  expected_schema: params_schema
+                }
+              )
+
+            # Update state with validation error
+            new_state =
+              Store.add_tool_call(
+                state,
+                tool_name,
+                tool_args,
+                %{
+                  error: error_message,
+                  status: "error",
+                  error_type: "validation_error",
+                  validation_errors: validation_errors
+                }
+              )
+
+            {{:emit, error_signal}, new_state}
+        end
+
+      {:ok, tool_fn} when is_function(tool_fn) ->
+        # Simple tool without schema, execute directly
         try do
           result = tool_fn.(tool_args)
-
-          # Create tool result signal
           result_signal = Signals.tool_result(tool_name, result)
-
-          # Update state with tool call and result
           new_state = Store.add_tool_call(state, tool_name, tool_args, result)
 
           {{:emit, result_signal}, new_state}
@@ -195,16 +329,121 @@ defmodule LLMAgent.Handlers do
           e ->
             error_message = Exception.message(e)
             error_signal = Signals.error(error_message, tool_name)
-            {{:emit, error_signal}, state}
+
+            # Update state with error
+            new_state =
+              Store.add_tool_call(
+                state,
+                tool_name,
+                tool_args,
+                %{
+                  error: error_message,
+                  status: "error"
+                }
+              )
+
+            {{:emit, error_signal}, new_state}
         end
 
       {:error, reason} ->
-        error_signal = Signals.error("Tool not found: #{reason}", tool_name)
-        {{:emit, error_signal}, state}
+        # Tool not found in registry
+        error_message = "Tool not found: #{reason}"
+        Logger.warning(error_message)
+
+        error_signal =
+          Signals.error(
+            error_message,
+            tool_name,
+            %{error_type: "not_found", available_tools: list_available_tools(state)}
+          )
+
+        # Update state with not found error
+        new_state =
+          Store.add_tool_call(
+            state,
+            tool_name,
+            tool_args,
+            %{
+              error: error_message,
+              status: "error",
+              error_type: "not_found"
+            }
+          )
+
+        {{:emit, error_signal}, new_state}
     end
   end
 
   def tool_handler(_signal, state), do: {:skip, state}
+
+  # Helper function to validate tool parameters against schema
+  defp validate_tool_parameters(args, schema) do
+    # Implementation of JSON Schema validation
+    # This is a simplified version, in production would use a proper validator
+    try do
+      # Check required fields
+      required = Map.get(schema, "required", [])
+      missing_fields = Enum.filter(required, fn field -> is_nil(Map.get(args, field)) end)
+
+      if length(missing_fields) > 0 do
+        {:error, %{missing_required: missing_fields}}
+      else
+        # Validate types if properties defined
+        properties = Map.get(schema, "properties", %{})
+
+        validation_errors =
+          Enum.reduce(properties, %{}, fn {field, field_schema}, errors ->
+            value = Map.get(args, field)
+
+            if is_nil(value) do
+              # Skip validation for optional fields that are not provided
+              errors
+            else
+              # Validate field type
+              expected_type = Map.get(field_schema, "type")
+              actual_type = determine_json_type(value)
+
+              if expected_type != actual_type do
+                Map.put(errors, field, "expected #{expected_type}, got #{actual_type}")
+              else
+                errors
+              end
+            end
+          end)
+
+        if map_size(validation_errors) > 0 do
+          {:error, %{type_mismatch: validation_errors}}
+        else
+          {:ok, args}
+        end
+      end
+    rescue
+      e -> {:error, %{validation_error: Exception.message(e)}}
+    end
+  end
+
+  # Helper to determine JSON Schema type of a value
+  defp determine_json_type(value) when is_binary(value), do: "string"
+  defp determine_json_type(value) when is_integer(value), do: "integer"
+  defp determine_json_type(value) when is_float(value), do: "number"
+  defp determine_json_type(value) when is_boolean(value), do: "boolean"
+  defp determine_json_type(value) when is_nil(value), do: "null"
+  defp determine_json_type(value) when is_map(value), do: "object"
+  defp determine_json_type(value) when is_list(value), do: "array"
+
+  # Get list of available tools from state
+  defp list_available_tools(state) do
+    available_tools = Map.get(state, :available_tools, [])
+
+    Enum.map(available_tools, fn tool ->
+      case tool do
+        %{name: name} -> name
+        name when is_binary(name) -> name
+        _ -> nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
 
   @doc """
   Handles tool result signals.

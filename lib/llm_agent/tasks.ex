@@ -3,7 +3,9 @@ defmodule LLMAgent.Tasks do
   Manages long-running tasks using AgentForge's execution capabilities.
 
   This module provides functions for starting, monitoring, and controlling
-  tasks that are implemented as sequences of AgentForge primitives.
+  tasks that are implemented as sequences of AgentForge primitives, supporting
+  complex flow patterns with branching, waiting conditions, and fine-grained
+  state management.
   """
 
   require Logger
@@ -49,7 +51,10 @@ defmodule LLMAgent.Tasks do
         task_id: task_id,
         task_params: params,
         task_state: "starting",
-        task_results: %{}
+        task_results: %{},
+        task_stage: "initializing",
+        task_checkpoints: [],
+        recovery_points: []
       })
 
     # Get task flow from definition using LLMAgent.Flows
@@ -65,27 +70,50 @@ defmodule LLMAgent.Tasks do
 
       Task.start(fn ->
         try do
-          result = execute_task(task_flow, Signal.new(:start, params), task_state, timeout_ms)
-          send(caller, {:task_complete, task_id, result})
+          # Initialize task monitoring
+          send(caller, {:task_update, task_id, "initializing", nil})
+
+          # Execute with stage tracking
+          {stage_results, intermediate_states} =
+            collect_stage_results(task_flow, Signal.new(:start, params), task_state, timeout_ms)
+
+          # Build final result with stage information
+          result = %{
+            stages: stage_results,
+            final_result: List.last(stage_results)[:result],
+            execution_time_ms: Enum.sum(Enum.map(stage_results, &(&1[:time_ms] || 0))),
+            completed_stages: length(stage_results)
+          }
+
+          send(caller, {:task_complete, task_id, result, List.last(intermediate_states)})
         catch
           kind, error ->
-            error_msg = Exception.format(kind, error, __STACKTRACE__)
-            send(caller, {:task_error, task_id, error_msg})
+            stack = __STACKTRACE__
+            error_msg = Exception.format(kind, error, stack)
+
+            error_data = %{
+              error: error_msg,
+              stage: task_state.task_stage,
+              recoverable: recoverable_error?(error),
+              recovery_points: task_state.recovery_points
+            }
+
+            send(caller, {:task_error, task_id, error_data})
         end
       end)
 
       # Return task ID and initial status signal
-      {task_id, Signals.task_state(task_id, "running", %{async: true})}
+      {task_id, Signals.task_state(task_id, "running", %{async: true, stages: ["initializing"]})}
     else
-      # Execute task synchronously
-      case execute_task(task_flow, Signal.new(:start, params), task_state, timeout_ms) do
-        {:ok, result, task_state} ->
-          # Task completed successfully
-          {:ok, task_id, result, task_state}
+      # Execute task synchronously with enhanced error handling and stage tracking
+      case execute_task_with_stages(task_flow, Signal.new(:start, params), task_state, timeout_ms) do
+        {:ok, result, stages, final_state} ->
+          # Task completed successfully with stage information
+          {:ok, task_id, %{result: result, stages: stages}, final_state}
 
-        {:error, reason, task_state} ->
-          # Task failed
-          {:error, task_id, reason, task_state}
+        {:error, reason, stage, state} ->
+          # Task failed with stage information
+          {:error, task_id, %{error: reason, stage: stage}, state}
       end
     end
   end
@@ -95,15 +123,28 @@ defmodule LLMAgent.Tasks do
 
   ## Parameters
 
-  - `_task_id` - The ID of the task
+  - `task_id` - The ID of the task
 
   ## Returns
 
-  A map of task statistics.
+  A map of task statistics including stage information.
   """
-  def get_stats(_task_id) do
-    # Leverage AgentForge's execution stats
-    AgentForge.Runtime.get_last_execution_stats()
+  def get_stats(task_id) do
+    # Get basic execution stats
+    base_stats = AgentForge.Runtime.get_last_execution_stats()
+
+    # Enhance with stage-specific information if available
+    case :ets.lookup(:task_stats, task_id) do
+      [{^task_id, stage_stats}] ->
+        Map.merge(base_stats, %{
+          stages: stage_stats,
+          current_stage: List.last(stage_stats)[:name],
+          stage_count: length(stage_stats)
+        })
+
+      [] ->
+        base_stats
+    end
   end
 
   @doc """
@@ -162,30 +203,173 @@ defmodule LLMAgent.Tasks do
 
   # Private functions
 
-  defp execute_task(task_flow, signal, task_state, timeout_ms) do
-    # Execute task with timeout
-    result =
-      AgentForge.Runtime.execute_with_limits(
-        task_flow,
-        signal,
-        initial_state: task_state,
-        timeout_ms: timeout_ms
-      )
+  # Check if an error is recoverable based on its type
+  defp recoverable_error?(_error) do
+    # In a real implementation, would check error type
+    # For now, return false
+    false
+  end
 
-    case result do
-      {:ok, result, task_state} ->
-        {:ok, result, task_state}
+  # Collect results from each stage of task execution
+  defp collect_stage_results(task_flow, signal, task_state, timeout_ms) do
+    # Initialize collection of stage results
+    {results, states} =
+      execute_and_collect_stages(task_flow, signal, task_state, timeout_ms, [], [task_state])
 
-      {:ok, result, task_state, _stats} ->
-        # Handle case with execution stats
-        {:ok, result, task_state}
+    {Enum.reverse(results), Enum.reverse(states)}
+  end
 
-      {:error, reason, task_state} ->
-        {:error, reason, task_state}
+  # Recursively execute stages and collect results
+  defp execute_and_collect_stages(_task_flow, _signal, state, _timeout_ms, results, states)
+       when state.task_stage == "completed" do
+    {results, states}
+  end
 
-      {:error, reason, task_state, _stats} ->
-        # Handle case with execution stats
-        {:error, reason, task_state}
+  defp execute_and_collect_stages(task_flow, signal, state, timeout_ms, results, states) do
+    # Update state with current stage
+    current_stage = state.task_stage
+    stage_start = System.monotonic_time(:millisecond)
+
+    # Execute current stage
+    case AgentForge.Runtime.execute_with_limits(
+           task_flow,
+           signal,
+           initial_state: state,
+           timeout_ms: timeout_ms
+         ) do
+      {:ok, result, new_state} ->
+        # Calculate stage execution time
+        stage_time = System.monotonic_time(:millisecond) - stage_start
+
+        # Record stage result
+        stage_result = %{
+          name: current_stage,
+          result: result,
+          time_ms: stage_time,
+          status: "completed"
+        }
+
+        # Determine next stage or completion
+        next_state =
+          if Map.get(new_state, :next_stage) do
+            %{new_state | task_stage: new_state.next_stage}
+          else
+            %{new_state | task_stage: "completed"}
+          end
+
+        # Add checkpoint for recovery
+        next_state =
+          Map.update(
+            next_state,
+            :recovery_points,
+            [current_stage],
+            &[current_stage | &1]
+          )
+
+        # Continue to next stage or return final results
+        execute_and_collect_stages(
+          task_flow,
+          Signal.new(:continue, result),
+          next_state,
+          timeout_ms,
+          [stage_result | results],
+          [next_state | states]
+        )
+
+      {:ok, result, new_state, _stats} ->
+        # Similar to above but with stats
+        # Calculate stage execution time
+        stage_time = System.monotonic_time(:millisecond) - stage_start
+
+        # Record stage result
+        stage_result = %{
+          name: current_stage,
+          result: result,
+          time_ms: stage_time,
+          status: "completed"
+        }
+
+        # Determine next stage or completion
+        next_state =
+          if Map.get(new_state, :next_stage) do
+            %{new_state | task_stage: new_state.next_stage}
+          else
+            %{new_state | task_stage: "completed"}
+          end
+
+        # Add checkpoint for recovery
+        next_state =
+          Map.update(
+            next_state,
+            :recovery_points,
+            [current_stage],
+            &[current_stage | &1]
+          )
+
+        # Continue to next stage or return final results
+        execute_and_collect_stages(
+          task_flow,
+          Signal.new(:continue, result),
+          next_state,
+          timeout_ms,
+          [stage_result | results],
+          [next_state | states]
+        )
+
+      {:error, reason, error_state} ->
+        # Record error result
+        stage_time = System.monotonic_time(:millisecond) - stage_start
+
+        error_result = %{
+          name: current_stage,
+          error: reason,
+          time_ms: stage_time,
+          status: "error"
+        }
+
+        # Mark state as error
+        final_error_state = %{error_state | task_stage: "error"}
+
+        # Return all results including error
+        {[error_result | results], [final_error_state | states]}
+
+      {:error, reason, error_state, _stats} ->
+        # Record error result with stats
+        stage_time = System.monotonic_time(:millisecond) - stage_start
+
+        error_result = %{
+          name: current_stage,
+          error: reason,
+          time_ms: stage_time,
+          status: "error"
+        }
+
+        # Mark state as error
+        final_error_state = %{error_state | task_stage: "error"}
+
+        # Return all results including error
+        {[error_result | results], [final_error_state | states]}
+    end
+  end
+
+  defp execute_task_with_stages(task_flow, signal, task_state, timeout_ms) do
+    # Similar to collect_stage_results but simpler for synchronous execution
+    try do
+      {results, states} = collect_stage_results(task_flow, signal, task_state, timeout_ms)
+      final_result = List.last(results)
+      final_state = List.last(states)
+
+      case final_result[:status] do
+        "completed" ->
+          {:ok, final_result[:result], results, final_state}
+
+        "error" ->
+          {:error, final_result[:error], final_result[:name], final_state}
+      end
+    catch
+      kind, error ->
+        error_msg = Exception.format(kind, error, __STACKTRACE__)
+        {:error, error_msg, task_state.task_stage, task_state}
     end
   end
 end
