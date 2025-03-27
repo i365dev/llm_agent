@@ -1,16 +1,31 @@
 defmodule LLMAgent.MixProject do
   use Mix.Project
 
+  @source_url "https://github.com/i365dev/llm_agent"
+  @version "3.0.0"
+
   def project do
     [
       app: :llm_agent,
-      version: "3.0.0",
+      version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: aliases(),
-      docs: docs()
+      docs: docs(),
+      test_coverage: [tool: ExCoveralls],
+      preferred_cli_env: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.post": :test,
+        "coveralls.html": :test,
+        "coveralls.github": :test
+      ],
+      description: "An abstraction library for building domain-specific intelligent agents based on Large Language Models",
+      package: package(),
+      homepage_url: @source_url,
+      source_url: @source_url
     ]
   end
 
@@ -34,6 +49,7 @@ defmodule LLMAgent.MixProject do
       {:openai, "~> 0.5.2"},
       {:anthropic, "~> 0.1.0"},
       {:finch, "~> 0.16.0"},
+      {:excoveralls, "~> 0.18", only: :test},
       # Development and test dependencies
       {:ex_doc, "~> 0.29", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
@@ -50,8 +66,8 @@ defmodule LLMAgent.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "CHANGELOG.md"] ++ Path.wildcard("guides/*.md"),
-      source_url: "https://github.com/i365dev/llm_agent",
+      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"] ++ Path.wildcard("guides/*.md"),
+      source_url: @source_url,
       formatters: ["html"],
       groups_for_extras: [
         Guides: Path.wildcard("guides/*.md")
@@ -76,6 +92,15 @@ defmodule LLMAgent.MixProject do
         ]
       ],
       before_closing_body_tag: &before_closing_body_tag/1
+    ]
+  end
+
+  defp package do
+    [
+      name: "llm_agent",
+      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md),
+      licenses: ["MIT"],
+      links: %{"GitHub" => @source_url}
     ]
   end
 
