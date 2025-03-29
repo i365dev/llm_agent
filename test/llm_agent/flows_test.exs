@@ -69,7 +69,9 @@ defmodule LLMAgent.FlowsTest do
 
         if item_index < length(items) do
           current_item = Enum.at(items, item_index)
-          new_state = state
+
+          new_state =
+            state
             |> Map.put(:current_item_index, item_index + 1)
             |> Map.put(:last_processed, current_item)
 

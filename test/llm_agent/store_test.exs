@@ -43,9 +43,15 @@ defmodule LLMAgent.StoreTest do
       store = Store.new(initial_state, name: store_name)
 
       assert is_atom(store)
-      assert {:ok, [%{role: "system", content: "You are a helpful assistant"}]} = AFStore.get(store, :history)
+
+      assert {:ok, [%{role: "system", content: "You are a helpful assistant"}]} =
+               AFStore.get(store, :history)
+
       assert {:ok, []} = AFStore.get(store, :thoughts)
-      assert {:ok, [%{name: "calculator", description: "Performs calculations"}]} = AFStore.get(store, :available_tools)
+
+      assert {:ok, [%{name: "calculator", description: "Performs calculations"}]} =
+               AFStore.get(store, :available_tools)
+
       assert {:ok, %{language: "en"}} = AFStore.get(store, :preferences)
 
       if pid = Process.whereis(store_name) do
@@ -62,17 +68,19 @@ defmodule LLMAgent.StoreTest do
 
       assert {:ok, history} = AFStore.get(store, :history)
       assert length(history) == 3
+
       assert [
-        %{role: "system", content: "You are a helpful assistant"},
-        %{role: "user", content: "Hello"},
-        %{role: "assistant", content: "Hi there"}
-      ] = history
+               %{role: "system", content: "You are a helpful assistant"},
+               %{role: "user", content: "Hello"},
+               %{role: "assistant", content: "Hi there"}
+             ] = history
 
       llm_history = Store.get_llm_history(store)
       assert length(llm_history) == 3
+
       assert Enum.all?(llm_history, fn msg ->
-        Map.has_key?(msg, :role) && Map.has_key?(msg, :content)
-      end)
+               Map.has_key?(msg, :role) && Map.has_key?(msg, :content)
+             end)
     end
 
     test "handles empty history gracefully", %{store: store} do
@@ -129,11 +137,12 @@ defmodule LLMAgent.StoreTest do
       task = %{id: "task_123", type: "analysis", status: "running"}
       assert :ok = Store.add_task(store, task)
 
-      updated_state = Store.update_task_state(
-        %{current_tasks: [task]},
-        "task_123",
-        "completed"
-      )
+      updated_state =
+        Store.update_task_state(
+          %{current_tasks: [task]},
+          "task_123",
+          "completed"
+        )
 
       assert [%{id: "task_123", status: "completed"}] = updated_state.current_tasks
     end
@@ -168,7 +177,8 @@ defmodule LLMAgent.StoreTest do
 
       # Trim history
       trimmed_state = Store.trim_history(%{history: history})
-      assert length(trimmed_state.history) <= 51 # 50 + 1 system message
+      # 50 + 1 system message
+      assert length(trimmed_state.history) <= 51
 
       # Verify system message is preserved
       assert Enum.any?(trimmed_state.history, fn msg -> msg.role == "system" end)

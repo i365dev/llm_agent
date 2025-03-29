@@ -195,9 +195,10 @@ defmodule LLMAgent.HandlersTest do
 
       # Verify history includes tool result
       history = Map.get(updated_state, :history, [])
+
       assert Enum.any?(history, fn entry ->
-        Map.get(entry, :role) == "function" && Map.get(entry, :name) == tool_name
-      end)
+               Map.get(entry, :role) == "function" && Map.get(entry, :name) == tool_name
+             end)
 
       # Verify pending tools were updated
       assert Map.get(updated_state, :pending_tools) == []
@@ -237,9 +238,15 @@ defmodule LLMAgent.HandlersTest do
       # Create state with conversation history
       state = %{
         history: [
-          %{role: "system", content: "You are a helpful AI assistant that provides weather information."},
+          %{
+            role: "system",
+            content: "You are a helpful AI assistant that provides weather information."
+          },
           %{role: "user", content: "What's the weather like in San Francisco today?"},
-          %{role: "assistant", thinking: "I should provide the current weather for San Francisco."}
+          %{
+            role: "assistant",
+            thinking: "I should provide the current weather for San Francisco."
+          }
         ]
       }
 
@@ -264,6 +271,7 @@ defmodule LLMAgent.HandlersTest do
       - **Condition**: Sunny
       - **Temperature**: 75°F
       """
+
       signal = Signals.response(structured_content)
       state = %{}
 
@@ -286,7 +294,10 @@ defmodule LLMAgent.HandlersTest do
       # Create state with context for the error
       state = %{
         history: [
-          %{role: "system", content: "You are a helpful AI assistant with access to weather information."},
+          %{
+            role: "system",
+            content: "You are a helpful AI assistant with access to weather information."
+          },
           %{role: "user", content: "What's the weather in Seoul today?"}
         ],
         pending_tools: [%{id: "weather-123", name: "get_weather", args: %{location: "Seoul"}}],
@@ -309,12 +320,14 @@ defmodule LLMAgent.HandlersTest do
 
       # Verify error information
       assert Enum.any?(errors, fn error ->
-        case error do
-          {:generic_error, msg, _timestamp} when is_binary(msg) ->
-            String.contains?(msg, message)
-          _ -> false
-        end
-      end)
+               case error do
+                 {:generic_error, msg, _timestamp} when is_binary(msg) ->
+                   String.contains?(msg, message)
+
+                 _ ->
+                   false
+               end
+             end)
     end
 
     test "handles critical errors with appropriate signal" do
