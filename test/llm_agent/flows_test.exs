@@ -20,10 +20,11 @@ defmodule LLMAgent.FlowsTest do
       # Verify flow is a function
       assert is_function(flow, 2)
 
-      # Verify initial state has correct structure
-      assert is_map(initial_state)
-      assert Map.get(initial_state, :history) == [%{role: "system", content: system_prompt}]
-      assert Map.get(initial_state, :available_tools) == tools
+      # Verify initial state has correct structure using Store
+      assert Map.has_key?(initial_state, :history)
+      assert initial_state.history == [%{role: "system", content: system_prompt}]
+      assert Map.has_key?(initial_state, :available_tools)
+      assert initial_state.available_tools == tools
 
       # Test flow is more complex because the flow has complex execution patterns
       # We'll skip the actual flow execution test as it would need mocking
@@ -36,7 +37,6 @@ defmodule LLMAgent.FlowsTest do
       # Setup a more realistic handler that works with the actual implementation
       task_handler = fn signal, state ->
         # Our handler should match the AgentForge handler pattern
-        # which returns a tuple like {:emit, signal} or {:next, signal}
         {{:next, signal}, Map.put(state, :processed, true)}
       end
 
@@ -48,13 +48,13 @@ defmodule LLMAgent.FlowsTest do
       # Verify flow is a function
       assert is_function(flow, 2)
 
-      # Create a simple test state - using underscore prefix for unused variables
-      _signal = Signals.user_message("Process this")
-      _state = %{}
-
       # We should test the flow behavior more comprehensively in a real test
       # but for now we'll just assert the flow exists and is callable
       assert is_function(flow, 2)
+
+      # Unused variables for test structure preservation
+      _signal = Signals.user_message("Process this")
+      _state = %{}
     end
   end
 
@@ -65,21 +65,16 @@ defmodule LLMAgent.FlowsTest do
 
       batch_handler = fn _signal, state ->
         # Handler should match AgentForge handler pattern
-        # Use the state to track which item we're processing
         item_index = Map.get(state, :current_item_index, 0)
 
         if item_index < length(items) do
           current_item = Enum.at(items, item_index)
-
-          updated_state =
-            state
+          new_state = state
             |> Map.put(:current_item_index, item_index + 1)
             |> Map.put(:last_processed, current_item)
 
-          # Return the next item and updated state
-          {{:next, current_item}, updated_state}
+          {{:next, current_item}, new_state}
         else
-          # End of batch
           {{:done, "Batch completed"}, state}
         end
       end

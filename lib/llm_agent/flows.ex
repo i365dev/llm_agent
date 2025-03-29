@@ -8,7 +8,7 @@ defmodule LLMAgent.Flows do
   """
 
   alias AgentForge
-  alias LLMAgent.{Handlers, Signals, Store}
+  alias LLMAgent.{Handlers, Signals}
 
   @doc """
   Creates a standard conversation flow with the given system prompt and tools.
@@ -30,12 +30,15 @@ defmodule LLMAgent.Flows do
       true
   """
   def conversation(system_prompt, tools \\ [], options \\ []) do
-    # Create initial store with system prompt in history
-    initial_state =
-      Store.new(%{
-        history: [%{role: "system", content: system_prompt}],
-        available_tools: tools
-      })
+    # Create initial state with system prompt in history
+    initial_state = %{
+      history: [%{role: "system", content: system_prompt}],
+      available_tools: tools,
+      thoughts: [],
+      tool_calls: [],
+      current_tasks: [],
+      preferences: %{}
+    }
 
     # Add any custom options to state
     initial_state = Map.merge(initial_state, Map.new(options))
@@ -43,8 +46,7 @@ defmodule LLMAgent.Flows do
     # Register tools with the system
     register_tools(tools)
 
-    # Create flow with standard handlers, using our established pattern
-    # This ensures backward compatibility while leveraging AgentForge capabilities
+    # Create flow with standard handlers
     flow = fn signal, state ->
       state
       |> handle_with(&Handlers.message_handler/2, signal)
@@ -92,8 +94,6 @@ defmodule LLMAgent.Flows do
       state_with_primitives = Map.put(state, :primitives, task_definition)
 
       # Execute primitives
-      # In a real implementation, this would call AgentForge's primitive execution
-      # For now, we're implementing a simplified version
       try do
         # Execute each primitive in sequence
         {result, new_state} =

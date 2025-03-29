@@ -4,21 +4,18 @@ defmodule LLMAgent.StoreTest do
   Verifies state management functionality.
   """
 
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias LLMAgent.Store
   alias AgentForge.Store, as: AFStore
 
   setup do
-    # 使用唯一存储名称避免测试间干扰
     store_name = String.to_atom("store_test_#{System.unique_integer([:positive])}")
     store = Store.new(%{}, name: store_name)
 
     on_exit(fn ->
-      # 清理存储如果仍然存在
-      case Process.whereis(store_name) do
-        nil -> :ok
-        pid -> Process.exit(pid, :normal)
+      if pid = Process.whereis(store_name) do
+        Process.exit(pid, :normal)
       end
     end)
 
@@ -27,124 +24,154 @@ defmodule LLMAgent.StoreTest do
 
   describe "store initialization" do
     test "creates a new store with default values", %{store: store} do
-      # Store is now a process name
       assert is_atom(store)
-
-      {:ok, history} = AFStore.get(store, :history)
-      assert history == []
-
-      {:ok, thoughts} = AFStore.get(store, :thoughts)
-      assert thoughts == []
-
-      {:ok, tool_calls} = AFStore.get(store, :tool_calls)
-      assert tool_calls == []
+      assert {:ok, []} = AFStore.get(store, :history)
+      assert {:ok, []} = AFStore.get(store, :thoughts)
+      assert {:ok, []} = AFStore.get(store, :tool_calls)
+      assert {:ok, []} = AFStore.get(store, :current_tasks)
+      assert {:ok, %{}} = AFStore.get(store, :preferences)
     end
 
     test "creates a new store with initial values" do
       initial_state = %{
         history: [%{role: "system", content: "You are a helpful assistant"}],
-        available_tools: [%{name: "calculator", description: "Performs calculations"}]
+        available_tools: [%{name: "calculator", description: "Performs calculations"}],
+        preferences: %{language: "en"}
       }
 
       store_name = String.to_atom("store_test_init_values")
       store = Store.new(initial_state, name: store_name)
 
-      # Store is now a process name
       assert is_atom(store)
+      assert {:ok, [%{role: "system", content: "You are a helpful assistant"}]} = AFStore.get(store, :history)
+      assert {:ok, []} = AFStore.get(store, :thoughts)
+      assert {:ok, [%{name: "calculator", description: "Performs calculations"}]} = AFStore.get(store, :available_tools)
+      assert {:ok, %{language: "en"}} = AFStore.get(store, :preferences)
 
-      {:ok, history} = AFStore.get(store, :history)
-
-      assert history == [
-               %{role: "system", content: "You are a helpful assistant"}
-             ]
-
-      {:ok, thoughts} = AFStore.get(store, :thoughts)
-      assert thoughts == []
-
-      {:ok, available_tools} = AFStore.get(store, :available_tools)
-
-      assert available_tools == [
-               %{name: "calculator", description: "Performs calculations"}
-             ]
-
-      # 清理测试后创建的 store
-      Process.exit(Process.whereis(store_name), :normal)
+      if pid = Process.whereis(store_name) do
+        Process.exit(pid, :normal)
+      end
     end
   end
 
   describe "message management" do
-    test "adds a user message to history", %{store: store} do
-      message = "Hello, assistant"
-      :ok = Store.add_message(store, "user", message)
+    test "adds messages to history and retrieves them correctly", %{store: store} do
+      assert :ok = Store.add_message(store, "system", "You are a helpful assistant")
+      assert :ok = Store.add_message(store, "user", "Hello")
+      assert :ok = Store.add_message(store, "assistant", "Hi there")
 
-      {:ok, history} = AFStore.get(store, :history)
-      assert length(history) == 1
-      [added_message] = history
-      assert added_message.role == "user"
-      assert added_message.content == message
-    end
-
-    test "adds an assistant message to history", %{store: store} do
-      message = "I can help with that"
-      :ok = Store.add_message(store, "assistant", message)
-
-      {:ok, history} = AFStore.get(store, :history)
-      assert length(history) == 1
-      [added_message] = history
-      assert added_message.role == "assistant"
-      assert added_message.content == message
-    end
-
-    test "gets LLM history in the correct format", %{store: store} do
-      :ok = Store.add_message(store, "system", "You are a helpful assistant")
-      :ok = Store.add_message(store, "user", "Hello")
-      :ok = Store.add_message(store, "assistant", "Hi there")
-
-      history = Store.get_llm_history(store)
-
+      assert {:ok, history} = AFStore.get(store, :history)
       assert length(history) == 3
+      assert [
+        %{role: "system", content: "You are a helpful assistant"},
+        %{role: "user", content: "Hello"},
+        %{role: "assistant", content: "Hi there"}
+      ] = history
 
-      assert Enum.all?(history, fn msg ->
-               Map.has_key?(msg, :role) && Map.has_key?(msg, :content)
-             end)
+      llm_history = Store.get_llm_history(store)
+      assert length(llm_history) == 3
+      assert Enum.all?(llm_history, fn msg ->
+        Map.has_key?(msg, :role) && Map.has_key?(msg, :content)
+      end)
+    end
+
+    test "handles empty history gracefully", %{store: store} do
+      assert [] = Store.get_llm_history(store)
     end
   end
 
   describe "thought management" do
-    test "adds a thought", %{store: store} do
-      thought = "I should answer the user's question directly"
-      :ok = Store.add_thought(store, thought)
-
-      {:ok, thoughts} = AFStore.get(store, :thoughts)
-      assert length(thoughts) == 1
-      assert List.first(thoughts) == thought
-    end
-
-    test "gets all thoughts", %{store: store} do
+    test "manages thoughts correctly", %{store: store} do
       thoughts = ["First thought", "Second thought"]
 
       Enum.each(thoughts, fn thought ->
-        :ok = Store.add_thought(store, thought)
+        assert :ok = Store.add_thought(store, thought)
       end)
 
-      retrieved_thoughts = Store.get_thoughts(store)
-      assert retrieved_thoughts == thoughts
+      assert {:ok, stored_thoughts} = AFStore.get(store, :thoughts)
+      assert stored_thoughts == thoughts
+      assert Store.get_thoughts(store) == thoughts
+    end
+
+    test "handles empty thoughts list", %{store: store} do
+      assert Store.get_thoughts(store) == []
     end
   end
 
   describe "tool call management" do
-    test "adds a tool call", %{store: store} do
+    test "manages tool calls correctly", %{store: store} do
       tool_name = "calculator"
       args = %{expression: "1 + 2"}
       result = %{output: 3}
-      :ok = Store.add_tool_call(store, tool_name, args, result)
 
-      {:ok, tool_calls} = AFStore.get(store, :tool_calls)
-      assert length(tool_calls) == 1
-      [tool_call] = tool_calls
-      assert tool_call.name == tool_name
-      assert tool_call.args == args
-      assert tool_call.result == result
+      assert :ok = Store.add_tool_call(store, tool_name, args, result)
+      assert {:ok, tool_calls} = AFStore.get(store, :tool_calls)
+      assert [%{name: ^tool_name, args: ^args, result: ^result}] = tool_calls
+    end
+
+    test "handles multiple tool calls", %{store: store} do
+      tool_calls = [
+        {"calculator", %{expression: "1 + 2"}, %{output: 3}},
+        {"weather", %{city: "London"}, %{temperature: 20}}
+      ]
+
+      Enum.each(tool_calls, fn {name, args, result} ->
+        assert :ok = Store.add_tool_call(store, name, args, result)
+      end)
+
+      assert {:ok, stored_calls} = AFStore.get(store, :tool_calls)
+      assert length(stored_calls) == 2
+    end
+  end
+
+  describe "task management" do
+    test "adds and updates tasks", %{store: store} do
+      task = %{id: "task_123", type: "analysis", status: "running"}
+      assert :ok = Store.add_task(store, task)
+
+      updated_state = Store.update_task_state(
+        %{current_tasks: [task]},
+        "task_123",
+        "completed"
+      )
+
+      assert [%{id: "task_123", status: "completed"}] = updated_state.current_tasks
+    end
+  end
+
+  describe "preference management" do
+    test "manages preferences correctly", %{store: store} do
+      initial_state = %{preferences: %{theme: "dark"}}
+      updated_state = Store.set_preferences(initial_state, %{language: "en"})
+
+      assert updated_state.preferences == %{theme: "dark", language: "en"}
+      assert Store.get_preferences(updated_state) == %{theme: "dark", language: "en"}
+      assert Store.get_preference(updated_state, :theme) == "dark"
+      assert Store.get_preference(updated_state, :missing, "default") == "default"
+    end
+  end
+
+  describe "history optimization" do
+    test "trims history while preserving system messages", %{store: store} do
+      # Add system message
+      :ok = Store.add_message(store, "system", "You are an assistant")
+
+      # Add many messages to exceed the default limit
+      Enum.each(1..60, fn n ->
+        :ok = Store.add_message(store, "user", "Message #{n}")
+        :ok = Store.add_message(store, "assistant", "Response #{n}")
+      end)
+
+      # Get current history length
+      {:ok, history} = AFStore.get(store, :history)
+      assert length(history) > 50
+
+      # Trim history
+      trimmed_state = Store.trim_history(%{history: history})
+      assert length(trimmed_state.history) <= 51 # 50 + 1 system message
+
+      # Verify system message is preserved
+      assert Enum.any?(trimmed_state.history, fn msg -> msg.role == "system" end)
     end
   end
 end
