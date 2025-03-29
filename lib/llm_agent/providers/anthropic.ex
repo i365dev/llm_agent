@@ -184,15 +184,15 @@ defmodule LLMAgent.Providers.Anthropic do
   defp parse_anthropic_response(response) do
     case response do
       %{content: content} = resp when is_list(content) ->
-        # 检查是否有工具调用
+        # Check if there are tool calls
         if Map.has_key?(resp, :tool_calls) and length(resp.tool_calls) > 0 do
-          # 包含工具调用的响应
+          # Response containing tool calls
           %{
             content: extract_text_content(content),
             tool_calls: resp.tool_calls
           }
         else
-          # 普通文本响应
+          # Regular text response
           %{
             content: extract_text_content(content),
             tool_calls: []
@@ -200,7 +200,7 @@ defmodule LLMAgent.Providers.Anthropic do
         end
 
       _ ->
-        # 处理其他类型的响应或错误
+        # Handle other types of responses or errors
         %{
           content: "Unable to parse response",
           tool_calls: []
