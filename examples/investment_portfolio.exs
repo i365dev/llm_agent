@@ -327,124 +327,132 @@ end
 
 alias LLMAgent.Examples.InvestmentTools
 
-# Define tool definitions
-# In a real LLMAgent implementation, these would be registered with the agent
-# and used through the LLMAgent API
-_tools = [
-  %{
-    name: "etf_screener",
-    description: "Screen ETFs based on criteria such as category and risk level",
-    parameters: %{
-      "type" => "object",
-      "properties" => %{
-        "category" => %{
-          "type" => "string",
-          "description" => "ETF category (US Equity, Bond, International Equity, etc.)"
+# Define tool definitions for the AgentForge workflow
+defmodule LLMAgent.Examples.InvestmentTools.Tools do
+  @moduledoc """
+  Tool definitions for the investment portfolio example.
+  In a real LLMAgent implementation, these would be registered with the agent.
+  """
+  
+  def get_tools do
+    [
+      %{
+        name: "etf_screener",
+        description: "Screen ETFs based on criteria such as category and risk level",
+        parameters: %{
+          "type" => "object",
+          "properties" => %{
+            "category" => %{
+              "type" => "string",
+              "description" => "ETF category (US Equity, Bond, International Equity, etc.)"
+            },
+            "risk_level" => %{
+              "type" => "string",
+              "description" => "Risk level (Low, Moderate, High)"
+            }
+          }
         },
-        "risk_level" => %{
-          "type" => "string",
-          "description" => "Risk level (Low, Moderate, High)"
-        }
-      }
-    },
-    execute: fn args -> InvestmentTools.screen_etfs(args) end
-  },
-  %{
-    name: "portfolio_constructor",
-    description: "Create a portfolio allocation from a list of ETFs",
-    parameters: %{
-      "type" => "object",
-      "properties" => %{
-        "etfs" => %{
-          "type" => "array",
-          "description" => "List of ETF tickers to include in the portfolio"
-        },
-        "risk_profile" => %{
-          "type" => "string",
-          "description" => "Risk profile (Conservative, Moderate, Aggressive)"
-        }
+        execute: fn args -> InvestmentTools.screen_etfs(args) end
       },
-      "required" => ["etfs", "risk_profile"]
-    },
-    execute: fn args ->
-      # Convert ticker list to ETF objects
-      etfs = InvestmentTools.screen_etfs(%{})[:etfs]
-      
-      # Filter to just the requested ETFs
-      selected_etfs = 
-        if Map.has_key?(args, "etfs") do
-          Enum.filter(etfs, fn etf -> etf.ticker in args["etfs"] end)
-        else
-          etfs
+      %{
+        name: "portfolio_constructor",
+        description: "Create a portfolio allocation from a list of ETFs",
+        parameters: %{
+          "type" => "object",
+          "properties" => %{
+            "etfs" => %{
+              "type" => "array",
+              "description" => "List of ETF tickers to include in the portfolio"
+            },
+            "risk_profile" => %{
+              "type" => "string",
+              "description" => "Risk profile (Conservative, Moderate, Aggressive)"
+            }
+          },
+          "required" => ["risk_profile"]
+        },
+        execute: fn args ->
+          # Convert ticker list to ETF objects
+          etfs = InvestmentTools.screen_etfs(%{})[:etfs]
+          
+          # Filter to just the requested ETFs if specified
+          selected_etfs = 
+            if Map.has_key?(args, "etfs") do
+              Enum.filter(etfs, fn etf -> etf.ticker in args["etfs"] end)
+            else
+              etfs
+            end
+          
+          # Create portfolio
+          risk_profile = Map.get(args, "risk_profile", "Moderate")
+          InvestmentTools.create_portfolio(selected_etfs, risk_profile)
         end
-      
-      # Create portfolio
-      risk_profile = Map.get(args, "risk_profile", "Moderate")
-      InvestmentTools.create_portfolio(selected_etfs, risk_profile)
-    end
-  },
-  %{
-    name: "portfolio_backtester",
-    description: "Run a backtest on a portfolio to see historical performance",
-    parameters: %{
-      "type" => "object",
-      "properties" => %{
-        "portfolio" => %{
-          "type" => "object",
-          "description" => "Portfolio object to backtest"
-        },
-        "years" => %{
-          "type" => "integer",
-          "description" => "Number of years to backtest"
-        }
       },
-      "required" => ["portfolio"]
-    },
-    execute: fn args ->
-      portfolio = args["portfolio"]
-      years = Map.get(args, "years", 10)
-      InvestmentTools.backtest_portfolio(portfolio, years)
-    end
-  },
-  %{
-    name: "portfolio_optimizer",
-    description: "Optimize a portfolio based on preferences",
-    parameters: %{
-      "type" => "object",
-      "properties" => %{
-        "portfolio" => %{
+      %{
+        name: "portfolio_backtester",
+        description: "Run a backtest on a portfolio to see historical performance",
+        parameters: %{
           "type" => "object",
-          "description" => "Portfolio object to optimize"
+          "properties" => %{
+            "portfolio" => %{
+              "type" => "object",
+              "description" => "Portfolio object to backtest"
+            },
+            "years" => %{
+              "type" => "integer",
+              "description" => "Number of years to backtest"
+            }
+          },
+          "required" => ["portfolio"]
         },
-        "preferences" => %{
-          "type" => "object",
-          "description" => "Optimization preferences"
-        }
+        execute: fn args ->
+          portfolio = args["portfolio"]
+          years = Map.get(args, "years", 10)
+          InvestmentTools.backtest_portfolio(portfolio, years)
+        end
       },
-      "required" => ["portfolio", "preferences"]
-    },
-    execute: fn args ->
-      portfolio = args["portfolio"]
-      preferences = args["preferences"]
-      InvestmentTools.optimize_portfolio(portfolio, preferences)
-    end
-  }
-]
+      %{
+        name: "portfolio_optimizer",
+        description: "Optimize a portfolio based on preferences",
+        parameters: %{
+          "type" => "object",
+          "properties" => %{
+            "portfolio" => %{
+              "type" => "object",
+              "description" => "Portfolio object to optimize"
+            },
+            "preferences" => %{
+              "type" => "object",
+              "description" => "Optimization preferences"
+            }
+          },
+          "required" => ["portfolio", "preferences"]
+        },
+        execute: fn args ->
+          portfolio = args["portfolio"]
+          preferences = args["preferences"]
+          InvestmentTools.optimize_portfolio(portfolio, preferences)
+        end
+      }
+    ]
+  end
 
-# Create a system prompt for the investment advisor
-system_prompt = """
-You are an investment advisor specialized in creating ETF portfolios.
-Use the available tools to create and optimize portfolios based on user requirements.
-
-When creating portfolios, follow these steps:
-1. Use etf_screener to find suitable ETFs
-2. Use portfolio_constructor to create an initial portfolio
-3. Use portfolio_backtester to evaluate performance
-4. If the user wants adjustments, use portfolio_optimizer
-
-Be thorough in your analysis and explanations, but avoid jargon.
-Always consider the user's risk tolerance and investment goals.
-"""
+  def get_system_prompt do
+    """
+    You are an investment advisor specialized in creating ETF portfolios.
+    Use the available tools to create and optimize portfolios based on user requirements.
+    
+    When creating portfolios, follow these steps:
+    1. Use etf_screener to find suitable ETFs
+    2. Use portfolio_constructor to create an initial portfolio
+    3. Use portfolio_backtester to evaluate performance
+    4. If the user wants adjustments, use portfolio_optimizer
+    
+    Be thorough in your analysis and explanations, but avoid jargon.
+    Always consider the user's risk tolerance and investment goals.
+    """
+  end
+end
 
 # Note: In a real application, we would use the actual LLMAgent.Flows API
 # We'd create a flow with the tools and system prompt, then run the flow
@@ -452,130 +460,386 @@ Always consider the user's risk tolerance and investment goals.
 # {flow, initial_state} = LLMAgent.Flows.conversation(system_prompt, tools)
 # AgentForge.run(flow, initial_state, user_message: "Create a retirement ETF portfolio for me.")
 
-# Demonstrates using LLMAgent for investment portfolio tasks
+# This example demonstrates LLMAgent's dynamic workflow capabilities
 defmodule LLMAgent.Examples.InvestmentDemo do
   @moduledoc """
-  Demonstrates how LLMAgent can handle multi-step investment portfolio workflows.
+  Demonstrates how LLMAgent can handle multi-step investment portfolio workflows
+  with dynamic decision-making based on context and user input.
   """
+  
+  alias LLMAgent.Examples.InvestmentTools.Tools
   
   @doc """
-  Run the investment portfolio demo, showing the agent creating a portfolio based on user input
-  and then adjusting it based on risk tolerance changes.
+  Run the investment portfolio demo with dynamic tool selection and state management
+  that simulates the way AgentForge and LLMAgent would handle this conversation.
   """
   def run do
+    # Initialize conversation state (similar to AgentForge.Store)
+    initial_state = %{
+      history: [],
+      available_tools: Tools.get_tools(),
+      portfolio: nil,
+      etfs: [],
+      backtest_results: nil
+    }
+    
     IO.puts("\n=== Investment Portfolio Example ===\n")
-    IO.puts("User: Create a retirement ETF portfolio for me.\n")
     
-    # Simulate processing a portfolio creation request
-    process_portfolio_creation()
+    # First user message simulation
+    first_message = "Create a retirement ETF portfolio for me."
+    IO.puts("User: #{first_message}\n")
     
-    IO.puts("\nUser: Can you reduce the risk level? I'm concerned about market volatility.\n")
-    # Simulate processing a risk adjustment request
-    process_risk_adjustment("Lower")
+    # Process first message - this simulates AgentForge.run with dynamic tool selection
+    updated_state = process_message(initial_state, first_message)
     
+    # Second user message - feedback on the portfolio
+    second_message = "Can you reduce the risk level? I'm concerned about market volatility."
+    IO.puts("\nUser: #{second_message}\n")
+    
+    # Process second message - notice how we pass the updated state
+    final_state = process_message(updated_state, second_message)
+    
+    # Example completion
     IO.puts("\n=== Example Complete ===")
-    IO.puts("This example demonstrates how LLMAgent enables dynamic, multi-step workflows")
-    IO.puts("that adapt based on user input and intermediate results.")
+    IO.puts("This demonstration shows how LLMAgent enables truly dynamic workflows")
+    IO.puts("where the LLM decides the next steps based on context and user input.")
     IO.puts("")
-    IO.puts("Try modifying the example to:")
-    IO.puts("1. Request an aggressive portfolio instead")
-    IO.puts("2. Add additional tools for tax analysis or retirement planning")
-    IO.puts("3. Implement more sophisticated portfolio construction logic")
+    IO.puts("Key concepts demonstrated:")
+    IO.puts("1. State persistence across interactions")
+    IO.puts("2. Dynamic tool selection based on context")
+    IO.puts("3. Multi-step reasoning with intermediate results")
+    IO.puts("4. Adaptive responses to user feedback")
+    
+    final_state
   end
   
-  # Simulate the multi-step portfolio creation process
-  defp process_portfolio_creation do
-    IO.puts("--- Stage 1: ETF Screening ---")
-    IO.puts("Assistant thinking: I should first screen for suitable ETFs...")
+  # Simulate the LLM's message processing and dynamic tool selection
+  # Process a user message by simulating LLM decision-making.
+  # Similar to how AgentForge would handle messages in a real implementation,
+  # this function analyzes the message, selects appropriate tools, and updates state.
+  #
+  # Returns updated state with tool results and conversation history.
+  @spec process_message(map(), String.t()) :: map()
+  defp process_message(state, message) do
+    # In a real implementation, this would call the LLM to analyze the message
+    # and decide which tool to use. Here we simulate that decision process.
+    {tool_name, tool_args, thinking} = simulate_llm_tool_selection(message, state)
     
-    # Simulate ETF screening
-    etf_results = InvestmentTools.screen_etfs(%{})
-    IO.puts("Found #{length(etf_results.etfs)} ETFs suitable for a retirement portfolio.")
+    # Show the "thinking" process that would happen in the LLM
+    IO.puts("Assistant thinking: #{thinking}\n")
     
-    # Continue to portfolio construction
-    process_portfolio_construction(etf_results.etfs)
+    if tool_name do
+      # Find the selected tool
+      tool = Enum.find(state.available_tools, fn t -> t.name == tool_name end)
+      
+      # Execute the tool with arguments
+      IO.puts("Executing tool: #{tool_name}")
+      result = tool.execute.(tool_args)
+      
+      # Update state with result
+      updated_state = update_state(state, tool_name, result)
+      
+      # Process the tool result (simulating LLM analyzing result and deciding next action)
+      process_tool_result(updated_state, tool_name, result, message)
+    else
+      # If no tool was selected, generate a final response
+      generate_final_response(state, message)
+      state
+    end
   end
   
-  # Simulate portfolio construction
-  defp process_portfolio_construction(etfs) do
-    IO.puts("\n--- Stage 2: Portfolio Construction ---")
-    IO.puts("Assistant thinking: Now I'll construct a balanced portfolio...")
+  # Update state based on tool results
+  @spec update_state(map(), String.t(), any()) :: map()
+  defp update_state(state, tool_name, result) do
+    # Update state based on which tool was executed
+    updated_state =
+      case tool_name do
+        "etf_screener" ->
+          Map.put(state, :etfs, result.etfs)
+          
+        "portfolio_constructor" ->
+          Map.put(state, :portfolio, result)
+          
+        "portfolio_backtester" ->
+          Map.put(state, :backtest_results, result)
+          
+        "portfolio_optimizer" ->
+          Map.put(state, :portfolio, result)
+          
+        _ -> state
+      end
+      
+    # Add this tool execution to history
+    history_entry = %{
+      tool: tool_name,
+      timestamp: DateTime.utc_now(),
+      result: result
+    }
     
-    # Create portfolio with moderate risk - we don't need to extract tickers separately
-    # since the create_portfolio function handles that
-    portfolio = InvestmentTools.create_portfolio(etfs, "Moderate")
-    
-    IO.puts("Created a moderate risk portfolio with expected return of #{Float.round(portfolio.expected_return, 2)}%")
-    IO.puts("Allocations:")
-    
-    Enum.each(portfolio.allocations, fn alloc ->
-      IO.puts("  #{alloc.ticker}: #{Float.round(alloc.allocation * 100, 1)}%")
-    end)
-    
-    # Continue to backtesting
-    process_portfolio_backtesting(portfolio)
+    Map.update(updated_state, :history, [history_entry], fn history -> [history_entry | history] end)
   end
   
-  # Simulate portfolio backtesting
-  defp process_portfolio_backtesting(portfolio) do
-    IO.puts("\n--- Stage 3: Portfolio Backtesting ---")
-    IO.puts("Assistant thinking: Let me evaluate the historical performance...")
-    
-    # Run backtest for 10 years
-    backtest = InvestmentTools.backtest_portfolio(portfolio, 10)
-    
-    IO.puts("Backtest Results (10 years):")
+  # Simulate the LLM analyzing a tool result and deciding the next action
+  @spec process_tool_result(map(), String.t(), any(), String.t()) :: map()
+  defp process_tool_result(state, tool_name, result, original_message) do
+    case tool_name do
+      "etf_screener" ->
+        # After getting ETF list, decide to construct a portfolio
+        etfs = result.etfs
+        thinking = "Now that I have a list of #{length(etfs)} ETFs, I should construct a balanced portfolio based on the user's needs."
+        IO.puts("Assistant thinking: #{thinking}\n")
+        
+        # Determine risk profile from message
+        risk_profile = determine_risk_profile(original_message)
+        
+        # Execute next tool
+        next_tool = Enum.find(state.available_tools, fn t -> t.name == "portfolio_constructor" end)
+        IO.puts("Executing tool: portfolio_constructor")
+        portfolio_result = next_tool.execute.(%{"risk_profile" => risk_profile})
+        
+        # Update state
+        updated_state = update_state(state, "portfolio_constructor", portfolio_result)
+        
+        # Continue to backtesting
+        process_tool_result(updated_state, "portfolio_constructor", portfolio_result, original_message)
+      
+      "portfolio_constructor" ->
+        # After portfolio construction, decide to do backtesting
+        thinking = "I've constructed a portfolio. To evaluate its performance, I should run a backtest."
+        IO.puts("Assistant thinking: #{thinking}\n")
+        
+        # Show portfolio details
+        IO.puts("Created a #{result.risk_profile} risk portfolio with expected return of #{Float.round(result.expected_return, 2)}%")
+        IO.puts("Allocations:")
+        
+        Enum.each(result.allocations, fn alloc ->
+          IO.puts("  #{alloc.ticker}: #{Float.round(alloc.allocation * 100, 1)}%")
+        end)
+        
+        # Execute backtesting
+        next_tool = Enum.find(state.available_tools, fn t -> t.name == "portfolio_backtester" end)
+        IO.puts("\nExecuting tool: portfolio_backtester")
+        backtest_result = next_tool.execute.(%{"portfolio" => result})
+        
+        # Update state
+        updated_state = update_state(state, "portfolio_backtester", backtest_result)
+        
+        # Generate final response for portfolio creation
+        generate_portfolio_response(updated_state)
+        updated_state
+      
+      "portfolio_optimizer" ->
+        # After optimization, generate response about the changes
+        thinking = "I've optimized the portfolio according to the user's risk preference. Now I'll explain the changes."
+        IO.puts("Assistant thinking: #{thinking}\n")
+        
+        # Show portfolio details
+        IO.puts("Optimized portfolio to #{result.risk_profile} risk profile with expected return of #{Float.round(result.expected_return, 2)}%")
+        IO.puts("New allocations:")
+        
+        Enum.each(result.allocations, fn alloc ->
+          IO.puts("  #{alloc.ticker}: #{Float.round(alloc.allocation * 100, 1)}%")
+        end)
+        
+        # Generate response for the adjustment
+        generate_adjustment_response(state, result)
+        state
+      
+      _ ->
+        # Default case if tool isn't recognized
+        IO.puts("Assistant thinking: I'm not sure how to process this tool result. I'll provide a generic response.\n")
+        generate_final_response(state, original_message)
+        state
+    end
+  end
+
+  # Simulate LLM's decision-making process for selecting a tool
+  @spec simulate_llm_tool_selection(String.t(), map()) :: {String.t() | nil, map() | nil, String.t()}
+  defp simulate_llm_tool_selection(message, state) do
+    cond do
+      # Initial portfolio request - decide to screen ETFs first
+      String.contains?(String.downcase(message), "portfolio") and state.portfolio == nil ->
+        {
+          "etf_screener", 
+          %{},
+          "The user is asking for a retirement ETF portfolio. I should first get a list of available ETFs using the etf_screener tool."
+        }
+      
+      # Risk reduction request - use portfolio optimizer with lower risk preference  
+      String.contains?(String.downcase(message), "risk") and 
+      (String.contains?(String.downcase(message), "reduce") or 
+       String.contains?(String.downcase(message), "lower") or
+       String.contains?(String.downcase(message), "concerned")) and
+      state.portfolio != nil ->
+        {
+          "portfolio_optimizer",
+          %{
+            "portfolio" => state.portfolio,
+            "preferences" => %{"risk_tolerance" => "Lower"}
+          },
+          "The user wants to reduce risk in their portfolio due to concerns about market volatility. I'll use the portfolio_optimizer tool to adjust for lower risk."
+        }
+      
+      # Risk increase request - use portfolio optimizer with higher risk preference
+      String.contains?(String.downcase(message), "risk") and 
+      (String.contains?(String.downcase(message), "increase") or 
+       String.contains?(String.downcase(message), "higher")) and
+      state.portfolio != nil ->
+        {
+          "portfolio_optimizer",
+          %{
+            "portfolio" => state.portfolio,
+            "preferences" => %{"risk_tolerance" => "Higher"}
+          },
+          "The user wants to increase risk in their portfolio. I'll use the portfolio_optimizer tool to adjust for higher risk."
+        }
+      
+      # General follow-up question about portfolio - no tool needed
+      state.portfolio != nil ->
+        {
+          nil,
+          nil,
+          "The user is asking about the existing portfolio. I don't need to use any tools for this, I can respond directly with the information I have."
+        }
+      
+      # Default case - unclear request
+      true ->
+        {
+          nil,
+          nil,
+          "I'm not sure what specific action to take based on this message. I'll respond directly without using tools."
+        }
+    end
+  end
+
+  # Generate response after portfolio creation and backtesting
+  @spec generate_portfolio_response(map()) :: :ok
+  defp generate_portfolio_response(state) do
+    portfolio = state.portfolio
+    backtest = state.backtest_results
+
+    # Display backtest results
+    IO.puts("\nBacktest Results (10 years):")
     IO.puts("  Initial investment: $#{Float.round(backtest.initial_investment, 2)}")
     IO.puts("  Final value: $#{Float.round(backtest.final_value, 2)}")
     IO.puts("  CAGR: #{Float.round(backtest.cagr, 2)}%")
     IO.puts("  Sharpe ratio: #{Float.round(backtest.sharpe_ratio, 2)}")
     IO.puts("  Max drawdown: #{Float.round(backtest.max_drawdown, 2)}%")
     
-    # Provide a final response
-    IO.puts("\nAssistant: I've created a moderate risk retirement portfolio for you with an expected annual return of #{Float.round(portfolio.expected_return, 2)}%. The portfolio consists of a diversified mix of ETFs including US stocks, international stocks, and bonds. Based on historical backtesting over 10 years, an initial investment of $100 would have grown to $#{Float.round(backtest.final_value, 2)}, with a compound annual growth rate of #{Float.round(backtest.cagr, 2)}%. Would you like me to adjust the risk level or make any other changes to this portfolio?")
-  end
-  
-  # Simulate portfolio risk adjustment
-  defp process_risk_adjustment(risk_direction) do
-    IO.puts("--- Risk Adjustment Stage ---")
-    IO.puts("Assistant thinking: The user wants to #{String.downcase(risk_direction)} the risk level. I need to retrieve the current portfolio from our conversation...")
-    
-    # Create a moderate portfolio as starting point
-    etfs = InvestmentTools.screen_etfs(%{})[:etfs]
-    current_portfolio = InvestmentTools.create_portfolio(etfs, "Moderate")
-    
-    IO.puts("Current portfolio has a #{current_portfolio.risk_profile} risk profile with expected return of #{Float.round(current_portfolio.expected_return, 2)}%")
-    
-    # Optimize the portfolio based on risk direction
-    optimized = InvestmentTools.optimize_portfolio(current_portfolio, %{"risk_tolerance" => risk_direction})
-    
-    IO.puts("Optimized portfolio to #{optimized.risk_profile} risk profile with expected return of #{Float.round(optimized.expected_return, 2)}%")
-    IO.puts("New allocations:")
-    
-    Enum.each(optimized.allocations, fn alloc ->
-      IO.puts("  #{alloc.ticker}: #{Float.round(alloc.allocation * 100, 1)}%")
-    end)
-    
-    # Final response after optimization
-    IO.puts("\nAssistant: I've adjusted your portfolio to a #{String.downcase(optimized.risk_profile)} risk profile as requested. The expected annual return is now #{Float.round(optimized.expected_return, 2)}%. I've #{if risk_direction == "Lower", do: "increased", else: "reduced"} the allocation to bonds and #{if risk_direction == "Lower", do: "reduced", else: "increased"} exposure to equities, particularly #{if risk_direction == "Higher", do: "emerging markets", else: ""}. This change should provide #{if risk_direction == "Lower", do: "more stability with somewhat lower returns", else: "potentially higher returns with increased volatility"}. Is this more aligned with your preferences?")
-  end
-  
+    # Generate detailed LLM-like response
+    response = """
+    I've created a #{String.downcase(portfolio.risk_profile)} risk retirement portfolio for you with an expected annual return of #{Float.round(portfolio.expected_return, 2)}%. 
 
+    The portfolio consists of a diversified mix of ETFs including US stocks, international stocks, and bonds. 
+    Based on historical backtesting over 10 years, an initial investment of $100 would have grown to $#{Float.round(backtest.final_value, 2)}, 
+    with a compound annual growth rate of #{Float.round(backtest.cagr, 2)}%.
+    
+    The risk metrics show a maximum drawdown of #{Float.round(backtest.max_drawdown, 2)}% and a Sharpe ratio of #{Float.round(backtest.sharpe_ratio, 2)}, 
+    which indicates a reasonable risk-adjusted return.
+    
+    Would you like me to adjust the risk level or make any other changes to this portfolio?
+    """
+    
+    IO.puts("\nAssistant: #{response}")
+  end
+
+  # Generate response after portfolio adjustment
+  @spec generate_adjustment_response(map(), map()) :: :ok
+  defp generate_adjustment_response(state, optimized) do
+    previous_portfolio = state.portfolio
+    risk_change = 
+      if previous_portfolio.risk_profile == "Aggressive" and optimized.risk_profile == "Moderate" or
+         previous_portfolio.risk_profile == "Moderate" and optimized.risk_profile == "Conservative" do
+        "Lower"
+      else
+        "Higher"
+      end
+      
+    response = """
+    I've adjusted your portfolio to a #{String.downcase(optimized.risk_profile)} risk profile as requested. 
+    The expected annual return is now #{Float.round(optimized.expected_return, 2)}%. 
+
+    I've #{if risk_change == "Lower", do: "increased", else: "reduced"} the allocation to bonds 
+    and #{if risk_change == "Lower", do: "reduced", else: "increased"} exposure to equities, 
+    particularly #{if risk_change == "Higher", do: "emerging markets", else: ""}. 
+    
+    This change should provide #{if risk_change == "Lower", do: "more stability with somewhat lower returns", else: "potentially higher returns with increased volatility"}. 
+    Is this more aligned with your preferences?
+    """
+    
+    IO.puts("\nAssistant: #{response}")
+  end
+
+  # Generate general response without tool use
+  @spec generate_final_response(map(), String.t()) :: :ok
+  defp generate_final_response(state, _message) do
+    response = 
+      cond do
+        # If we have a portfolio but no specific tool was selected
+        state.portfolio != nil ->
+          """
+          Based on our conversation, I understand you're interested in your investment portfolio. 
+          Your current #{state.portfolio.risk_profile} risk portfolio has an expected return of #{Float.round(state.portfolio.expected_return, 2)}%.
+          
+          If you'd like me to make adjustments or provide more information about specific aspects of the portfolio, 
+          just let me know!
+          """
+          
+        # No portfolio created yet, generic response
+        true ->
+          """
+          I'd be happy to help with your investment portfolio needs. To get started, 
+          I can create a retirement ETF portfolio with diversified asset allocation 
+          tailored to your risk preferences. Would you like me to proceed with that?
+          """
+      end
+      
+    IO.puts("\nAssistant: #{response}")
+  end
+  
+  # Determine risk profile from user message
+  @spec determine_risk_profile(String.t()) :: String.t()
+  defp determine_risk_profile(message) do
+    message = String.downcase(message)
+    cond do
+      String.contains?(message, "aggressive") or 
+      String.contains?(message, "high risk") or
+      String.contains?(message, "higher risk") or
+      String.contains?(message, "growth") ->
+        "Aggressive"
+        
+      String.contains?(message, "conservative") or
+      String.contains?(message, "low risk") or
+      String.contains?(message, "lower risk") or
+      String.contains?(message, "safe") ->
+        "Conservative"
+        
+      true ->
+        "Moderate" # Default to moderate risk
+    end
+  end
 end
 
-# Process the original user message
-IO.puts("\n=== Investment Portfolio Example ===")
-IO.puts("\nUser: Create a retirement ETF portfolio for me.")
+# Execute the investment portfolio example demonstrating dynamic LLM workflows
+#
+# This example showcases how LLMAgent can simulate LLM decision-making
+# to dynamically select and execute tools based on user input and context.
+#
+# In this example, the AgentForge/LLMAgent architecture enables:
+# 1. Maintaining conversation state across multiple interactions
+# 2. Dynamically deciding which tools to use based on context
+# 3. Making multi-step decisions with intermediate results
+# 4. Adapting to user feedback
 
-# Run the demo
+# Run the demo with the new dynamic simulation approach
 LLMAgent.Examples.InvestmentDemo.run()
 
-# Add a prompt to the end to experiment with the example
-IO.puts("\n=== Example Complete ===")
-IO.puts("This example demonstrates how LLMAgent enables dynamic, multi-step workflows")
-IO.puts("that adapt based on user input and intermediate results.")
-IO.puts("")
-IO.puts("Try modifying the example to:")
-IO.puts("1. Request an aggressive portfolio instead")
-IO.puts("2. Add additional tools for tax analysis or retirement planning")
-IO.puts("3. Implement more sophisticated portfolio construction logic")
+# Print additional information about extending the example
+IO.puts("\n=== Further Extensions ===\n")
+IO.puts("Try modifying this example to:")
+IO.puts("1. Add additional tools (tax analysis, retirement planning)")
+IO.puts("2. Implement more complex LLM simulation logic")
+IO.puts("3. Integrate with real LLM providers via LLMAgent plugins")
+IO.puts("4. Create a more sophisticated portfolio construction algorithm")
+IO.puts("\nThis example demonstrates the core pattern behind LLMAgent's dynamic workflow capabilities.")
+IO.puts("In a real implementation, the LLM would make the decisions that are simulated here.")

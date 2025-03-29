@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-03-29
+
+### Added
+- Enhanced documentation for dynamic workflow orchestration
+- New guide for dynamic workflows with examples across domains
+- Architecture documentation updates highlighting workflow emergence
+
 ## [0.1.0] - 2025-03-28
 
 ### Added

@@ -96,6 +96,49 @@ classDiagram
     LLMAgent.Flows -- LLMAgent.Store
 ```
 
+## Dynamic Workflow Orchestration
+
+One of LLMAgent's key strengths is its ability to support truly dynamic workflows that emerge from LLM decisions, rather than being hardcoded in advance:
+
+### Workflow Emergence
+
+In a traditional application, the sequence of operations is predetermined by the developer. With LLMAgent, the workflow emerges dynamically:
+
+1. **Context-Based Decisions**: The LLM analyzes user inputs and current state to decide the next steps
+2. **Tool Selection**: Tools are chosen dynamically based on the specific needs of the current task
+3. **Multi-Step Processing**: Complex tasks are broken down into sequences of operations
+4. **Adaptive Responses**: The system adjusts based on intermediate results and user feedback
+
+### Example: Investment Portfolio Creation
+
+The investment portfolio example demonstrates this dynamic capability:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant LLM
+    participant Tools
+    
+    User->>LLM: "Create a retirement portfolio"
+    LLM->>LLM: Decide to screen ETFs first
+    LLM->>Tools: Execute ETF screener
+    Tools-->>LLM: ETF screening results
+    LLM->>LLM: Decide to create portfolio
+    LLM->>Tools: Execute portfolio constructor
+    Tools-->>LLM: Initial portfolio
+    LLM->>Tools: Execute portfolio backtester
+    Tools-->>LLM: Backtest results
+    LLM-->>User: Present portfolio with analysis
+    
+    User->>LLM: "Lower the risk level"
+    LLM->>LLM: Decide to optimize for lower risk
+    LLM->>Tools: Execute portfolio optimizer
+    Tools-->>LLM: Optimized portfolio
+    LLM-->>User: Present adjusted portfolio
+```
+
+This workflow was not predefined - it emerged from the LLM's analysis of user requests and available tools. The same architecture can support completely different workflows in other domains without changing the underlying code.
+
 ## Extension Points
 
 LLMAgent is designed to be extended in several ways:

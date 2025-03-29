@@ -16,6 +16,7 @@ LLMAgent is an abstraction library for building domain-specific intelligent agen
 - 💬 Context and conversation management
 - 🔌 Plugin-based provider integrations
 - 🔄 AgentForge compatibility
+- 🌊 **Dynamic workflow orchestration** - Enable LLMs to create multi-step workflows based on context
 
 ## Installation
 
@@ -24,7 +25,7 @@ Add `llm_agent` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:llm_agent, "~> 0.1.0"},
+    {:llm_agent, "~> 0.1.1"},
     # Optional LLM provider dependencies
     {:openai, "~> 0.5.0"}, # If using OpenAI
     {:anthropic, "~> 0.1.0"} # If using Anthropic
