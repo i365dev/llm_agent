@@ -20,7 +20,8 @@ defmodule LLMAgent.MixProject do
         "coveralls.detail": :test,
         "coveralls.post": :test,
         "coveralls.html": :test,
-        "coveralls.github": :test
+        "coveralls.github": :test,
+        "test.examples": :test
       ],
       description:
         "An abstraction library for building domain-specific intelligent agents based on Large Language Models",
@@ -59,9 +60,41 @@ defmodule LLMAgent.MixProject do
 
   defp aliases do
     [
-      test: ["test"],
+      # Run standard tests and then run examples
+      test: ["test", &run_examples/1],
+      # Run only the examples files
+      "test.examples": [&run_examples/1],
       lint: ["format", "credo --strict"]
     ]
+  end
+
+  # Custom function to run all example files in the examples directory
+  defp run_examples(_) do
+    IO.puts("\n=== Running examples ===\n")
+
+    # Find all .exs files in the examples directory
+    examples = Path.wildcard("examples/**/*.exs")
+
+    # Run each example file
+    Enum.each(examples, fn example_file ->
+      relative_path = Path.relative_to_cwd(example_file)
+      IO.puts("Running example: #{relative_path}")
+
+      try do
+        # Capture output to avoid cluttering the test results
+        ExUnit.CaptureIO.capture_io(fn ->
+          Code.eval_file(example_file)
+        end)
+
+        IO.puts("✓ Example #{relative_path} completed successfully\n")
+      rescue
+        e ->
+          IO.puts("✗ Example #{relative_path} failed with error: #{inspect(e)}\n")
+          Mix.raise("Example failed: #{relative_path}")
+      end
+    end)
+
+    IO.puts("=== Finished running examples ===\n")
   end
 
   defp docs do
