@@ -241,6 +241,68 @@ defmodule LLMAgent.Store do
   end
 
   @doc """
+  Adds an error record to the state.
+
+  ## Parameters
+
+  - `state` - The current store state
+  - `error` - The error record, typically in the form of a tuple with error type, message, and timestamp
+
+  ## Returns
+
+  An updated state with the new error record added.
+
+  ## Examples
+
+      iex> state = LLMAgent.Store.new()
+      iex> state = LLMAgent.Store.add_error(state, {:llm_error, "Service unavailable", DateTime.utc_now()})
+      iex> [error] = state.errors
+      iex> elem(error, 0) == :llm_error
+      true
+  """
+  def add_error(state, error) do
+    Map.update(state, :errors, [error], &(&1 ++ [error]))
+  end
+
+  @doc """
+  Adds a function result to the state, useful for tracking tool execution outcomes.
+
+  ## Parameters
+
+  - `state` - The current store state
+  - `function_name` - The name of the function/tool
+  - `result` - The result returned by the function
+
+  ## Returns
+
+  An updated state with the function result added to history in a format compatible with LLM context.
+
+  ## Examples
+
+      iex> state = LLMAgent.Store.new()
+      iex> state = LLMAgent.Store.add_function_result(state, "get_weather", %{temp: 72})
+      iex> Enum.any?(state.history, fn msg -> msg.role == "function" end)
+      true
+  """
+  def add_function_result(state, function_name, result) do
+    # Convert result to string if it's not already
+    result_str =
+      if is_binary(result) do
+        result
+      else
+        Jason.encode!(result, pretty: true)
+      end
+
+    # Add function result as a message in history
+    Map.update(
+      state,
+      :history,
+      [],
+      &(&1 ++ [%{role: "function", name: function_name, content: result_str}])
+    )
+  end
+
+  @doc """
   Gets a specific user preference.
 
   ## Parameters

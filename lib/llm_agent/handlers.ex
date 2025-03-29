@@ -40,38 +40,60 @@ defmodule LLMAgent.Handlers do
     # Add user message to history
     new_state = Store.add_message(state, "user", signal.data)
 
-    # Get LLM provider
-    _llm_provider = Map.get(state, :llm_provider, :default)
+    # Get provider and tools configuration
+    provider = Map.get(state, :provider, :openai)
     tools = Map.get(state, :available_tools, [])
 
     # Prepare LLM context from history
     history = Store.get_llm_history(new_state)
 
-    # Call LLM with message and available tools
-    llm_client = Map.get(state, :llm_client, &call_llm/3)
+    # Use LLMAgent.Plugin to call the LLM directly for consistency
+    try do
+      llm_result =
+        LLMAgent.Plugin.call_llm(%{
+          "provider" => provider,
+          "messages" => history,
+          "tools" => tools,
+          "options" => Map.get(state, :llm_options, %{})
+        })
 
-    case llm_client.(signal.data, history, tools) do
-      {:thinking, thought} ->
-        thinking_signal = Signals.thinking(thought, 1)
-        updated_state = Store.add_thought(new_state, thought)
+      # Process the result based on content and tool calls
+      cond do
+        # If there are tool calls in the response
+        has_tool_calls?(llm_result) ->
+          tool_calls = extract_tool_calls(llm_result)
+          # Use first tool call (could be extended to handle multiple)
+          [first_tool | _rest] = tool_calls
 
-        {{:emit, thinking_signal}, updated_state}
+          tool_data = %{
+            name: first_tool.name,
+            args: first_tool.arguments
+          }
 
-      {:tool_call, tool, args} ->
-        tool_signal = Signals.tool_call(tool, args)
+          # Use AgentForge.Signal directly instead of Signals module
+          {AgentForge.Signal.emit(:tool_call, tool_data), new_state}
 
-        {{:emit, tool_signal}, new_state}
+        # If we should start thinking (based on content patterns)
+        contains_thinking_marker?(llm_result) ->
+          thought = extract_content(llm_result)
+          updated_state = Store.add_thought(new_state, thought)
+          # Start thinking process at step 1
+          thinking_meta = %{step: 1}
+          {AgentForge.Signal.emit(:thinking, thought, thinking_meta), updated_state}
 
-      {:response, content} ->
-        response_signal = Signals.response(content)
-        updated_state = Store.add_message(new_state, "assistant", content)
+        # Otherwise, generate a direct response
+        true ->
+          content = extract_content(llm_result)
+          updated_state = Store.add_message(new_state, "assistant", content)
+          {AgentForge.Signal.emit(:response, content), updated_state}
+      end
+    rescue
+      error ->
+        Logger.error("Error in message handler: #{inspect(error)}")
+        error_meta = %{source: "llm_call"}
 
-        {{:emit, response_signal}, updated_state}
-
-      {:error, message} ->
-        error_signal = Signals.error(message, "llm_call")
-
-        {{:emit, error_signal}, new_state}
+        {AgentForge.Signal.emit(:error, "LLM processing failed: #{inspect(error)}", error_meta),
+         new_state}
     end
   end
 
@@ -117,35 +139,56 @@ defmodule LLMAgent.Handlers do
 
     # Call LLM with updated context including thoughts
     history = Store.get_llm_history(new_state)
-    thoughts = Store.get_thoughts(new_state)
-    _tools = Map.get(state, :available_tools, [])
+    tools = Map.get(state, :available_tools, [])
+    provider = Map.get(state, :provider, :openai)
 
-    # Get LLM function from state or use default
-    llm_with_thinking = Map.get(state, :llm_with_thinking, &call_llm_with_thinking/3)
+    # Use LLMAgent.Plugin to call the LLM directly - this ensures we're using
+    # the real implementation rather than a mock function
+    try do
+      llm_result =
+        LLMAgent.Plugin.call_llm(%{
+          "provider" => provider,
+          "messages" => format_history_with_thought(history, thought),
+          "tools" => tools,
+          "options" => Map.get(state, :llm_options, %{})
+        })
 
-    case llm_with_thinking.(history, thoughts, []) do
-      {:thinking, next_thought} ->
-        # Continue thinking
-        next_signal = Signals.thinking(next_thought, step + 1)
-        updated_state = Store.add_thought(new_state, next_thought)
+      # Process the result based on content and tool calls
+      cond do
+        # If there are tool calls in the response
+        has_tool_calls?(llm_result) ->
+          tool_calls = extract_tool_calls(llm_result)
+          # Use first tool call (could be extended to handle multiple)
+          [first_tool | _rest] = tool_calls
 
-        {{:emit, next_signal}, updated_state}
+          tool_data = %{
+            name: first_tool.name,
+            args: first_tool.arguments
+          }
 
-      {:tool_call, tool, args} ->
-        # Need to call a tool
-        tool_signal = Signals.tool_call(tool, args)
-        {{:emit, tool_signal}, new_state}
+          # Use AgentForge.Signal directly instead of Signals module
+          {AgentForge.Signal.emit(:tool_call, tool_data), new_state}
 
-      {:response, content} ->
-        # Final response
-        response_signal = Signals.response(content)
-        final_state = Store.add_message(new_state, "assistant", content)
+        # If we want to continue thinking (based on content containing a thinking marker)
+        should_continue_thinking?(llm_result, step) ->
+          next_thought = extract_content(llm_result)
+          updated_state = Store.add_thought(new_state, next_thought)
+          next_meta = %{step: step + 1}
+          {AgentForge.Signal.emit(:thinking, next_thought, next_meta), updated_state}
 
-        {{:emit, response_signal}, final_state}
+        # Otherwise, generate a response
+        true ->
+          content = extract_content(llm_result)
+          final_state = Store.add_message(new_state, "assistant", content)
+          {AgentForge.Signal.emit(:response, content), final_state}
+      end
+    rescue
+      error ->
+        Logger.error("Error in thinking handler: #{inspect(error)}")
+        error_meta = %{source: "thinking"}
 
-      {:error, message} ->
-        error_signal = Signals.error(message, "thinking")
-        {{:emit, error_signal}, new_state}
+        {AgentForge.Signal.emit(:error, "LLM processing failed: #{inspect(error)}", error_meta),
+         state}
     end
   end
 
@@ -492,33 +535,72 @@ defmodule LLMAgent.Handlers do
 
     # Get LLM history and tools
     history = Store.get_llm_history(state)
-    thoughts = Store.get_thoughts(state)
-    _tools = Map.get(state, :available_tools, [])
+    _thoughts = Store.get_thoughts(state)
+    tools = Map.get(state, :available_tools, [])
 
-    # Get LLM function from state or use default
-    llm_with_tool_result = Map.get(state, :llm_with_tool_result, &call_llm_with_tool_result/4)
+    # Update state to remove from pending tools if applicable
+    new_state =
+      state
+      |> Map.update(:pending_tools, [], fn pending ->
+        Enum.reject(pending, fn %{name: name} -> name == tool_name end)
+      end)
 
-    # Call LLM with tool result
-    case llm_with_tool_result.(history, thoughts, tool_name, tool_result) do
-      {:thinking, thought} ->
-        thinking_signal = Signals.thinking(thought, 1)
-        new_state = Store.add_thought(state, thought)
+    # Add function call to history for proper LLM context
+    new_state =
+      Store.add_function_result(new_state, tool_name, tool_result)
 
-        {{:emit, thinking_signal}, new_state}
+    # Use LLMAgent.Plugin to call the LLM directly
+    try do
+      provider = Map.get(state, :provider, :openai)
 
-      {:tool_call, tool, args} ->
-        tool_signal = Signals.tool_call(tool, args)
-        {{:emit, tool_signal}, state}
+      # Format history to include tool result
+      formatted_history = format_history_with_tool_result(history, tool_name, tool_result)
 
-      {:response, content} ->
-        response_signal = Signals.response(content)
-        new_state = Store.add_message(state, "assistant", content)
+      llm_result =
+        LLMAgent.Plugin.call_llm(%{
+          "provider" => provider,
+          "messages" => formatted_history,
+          "tools" => tools,
+          "options" => Map.get(state, :llm_options, %{})
+        })
 
-        {{:emit, response_signal}, new_state}
+      # Process the result based on content and tool calls
+      cond do
+        # If there are tool calls in the response
+        has_tool_calls?(llm_result) ->
+          tool_calls = extract_tool_calls(llm_result)
+          # Use first tool call
+          [first_tool | _rest] = tool_calls
 
-      {:error, message} ->
-        error_signal = Signals.error(message, "tool_result")
-        {{:emit, error_signal}, state}
+          tool_data = %{
+            name: first_tool.name,
+            args: first_tool.arguments
+          }
+
+          # Use AgentForge.Signal directly
+          {AgentForge.Signal.emit(:tool_call, tool_data), new_state}
+
+        # If we should continue thinking
+        should_continue_thinking?(llm_result, 1) ->
+          next_thought = extract_content(llm_result)
+          updated_state = Store.add_thought(new_state, next_thought)
+          # Start from step 2 after tool use
+          next_meta = %{step: 2}
+          {AgentForge.Signal.emit(:thinking, next_thought, next_meta), updated_state}
+
+        # Otherwise, generate a response
+        true ->
+          content = extract_content(llm_result)
+          final_state = Store.add_message(new_state, "assistant", content)
+          {AgentForge.Signal.emit(:response, content), final_state}
+      end
+    rescue
+      error ->
+        Logger.error("Error in tool result handler: #{inspect(error)}")
+        error_meta = %{source: "tool_result", tool: tool_name}
+
+        {AgentForge.Signal.emit(:error, "LLM processing failed: #{inspect(error)}", error_meta),
+         state}
     end
   end
 
@@ -592,8 +674,9 @@ defmodule LLMAgent.Handlers do
         signal.data
       end
 
-    # Create signal with formatted response
-    formatted_signal = Signals.response(formatted_response)
+    # Use AgentForge.Signal directly to create formatted response signal
+    # and return as halting signal to end the flow
+    formatted_signal = AgentForge.Signal.new(:response, formatted_response)
 
     # Return formatted response with unchanged state
     # This is the final signal in the chain
@@ -628,35 +711,60 @@ defmodule LLMAgent.Handlers do
     message = signal.data.message
     source = signal.data.source
 
-    # Log error
-    _error_message = "LLMAgent error in #{source}: #{message}"
-    Logger.error("LLMAgent error in #{source}: #{message}")
+    # Log error with more context
+    Logger.error("LLMAgent error in #{source}: #{message}\nSignal: #{inspect(signal)}")
 
     # Attempt recovery based on source
     case source do
       "llm_call" ->
         # LLM service error - return error message as response
         response = "I'm sorry, I'm having trouble processing your request: #{message}"
-        response_signal = Signals.response(response)
 
-        new_state = Store.add_message(state, "assistant", response)
-        {{:emit, response_signal}, new_state}
+        # Create error log in state for debugging
+        updated_state =
+          state
+          |> Store.add_error({:llm_error, message, DateTime.utc_now()})
+          |> Store.add_message("assistant", response)
+
+        # Use AgentForge.Signal directly
+        {AgentForge.Signal.emit(:response, response), updated_state}
 
       "tool_call" ->
         # Tool error - return error message as response
         response = "I tried to use a tool but encountered an error: #{message}"
-        response_signal = Signals.response(response)
 
-        new_state = Store.add_message(state, "assistant", response)
-        {{:emit, response_signal}, new_state}
+        # Add more context to state for debugging
+        updated_state =
+          state
+          |> Store.add_error({:tool_error, message, DateTime.utc_now()})
+          |> Store.add_message("assistant", response)
+
+        # Use AgentForge.Signal directly
+        {AgentForge.Signal.emit(:response, response), updated_state}
+
+      "tool_result" ->
+        # Error processing tool result
+        response = "I received a tool result but encountered an error: #{message}"
+
+        updated_state =
+          state
+          |> Store.add_error({:tool_result_error, message, DateTime.utc_now()})
+          |> Store.add_message("assistant", response)
+
+        # Use AgentForge.Signal directly
+        {AgentForge.Signal.emit(:response, response), updated_state}
 
       _ ->
         # Generic error - return as response
         response = "An error occurred: #{message}"
-        response_signal = Signals.response(response)
 
-        new_state = Store.add_message(state, "assistant", response)
-        {{:emit, response_signal}, new_state}
+        updated_state =
+          state
+          |> Store.add_error({:generic_error, message, DateTime.utc_now()})
+          |> Store.add_message("assistant", response)
+
+        # Use AgentForge.Signal directly
+        {AgentForge.Signal.emit(:response, response), updated_state}
     end
   end
 
@@ -664,20 +772,159 @@ defmodule LLMAgent.Handlers do
 
   # Private functions
 
-  # Default LLM client implementation
-  defp call_llm(_message, _history, _tools) do
-    # This is a placeholder - in a real implementation, this would call an LLM service
-    # In production, this would be replaced by a real LLM client injected into the state
-    {:response, "This is a placeholder response. Implement a real LLM client."}
+  # Helper functions for LLM processing with AgentForge integration
+
+  # Format history with the current thought for LLM context
+  defp format_history_with_thought(history, thought) do
+    # Add a system message explaining the thought process
+    thought_message = %{"role" => "system", "content" => "Current thinking step: #{thought}"}
+    history ++ [thought_message]
   end
 
-  defp call_llm_with_thinking(_history, _thoughts, _tools) do
-    # Placeholder - in a real implementation, this would call an LLM service
-    {:response, "This is a placeholder response after thinking. Implement a real LLM client."}
+  # Format history with tool result for LLM context
+  defp format_history_with_tool_result(history, tool_name, tool_result) do
+    # Add a function result message to the conversation history
+    formatted_result = Jason.encode!(tool_result, pretty: true)
+
+    function_result_message = %{
+      "role" => "function",
+      "name" => tool_name,
+      "content" => formatted_result
+    }
+
+    # Add system guidance message
+    guidance_message = %{
+      "role" => "system",
+      "content" =>
+        "You received a result from the #{tool_name} function. Use this information to continue the conversation."
+    }
+
+    history ++ [function_result_message, guidance_message]
   end
 
-  defp call_llm_with_tool_result(_history, _thoughts, _tool_name, _tool_result) do
-    # Mock implementation that returns a thinking signal
-    {:thinking, "I've processed the tool result and am continuing to work on the task."}
+  # Check if an LLM response contains tool calls
+  defp has_tool_calls?(llm_result) do
+    case llm_result do
+      %{"tool_calls" => tool_calls} when is_list(tool_calls) and length(tool_calls) > 0 -> true
+      _ -> false
+    end
+  end
+
+  # Check if content contains thinking markers that suggest this should be a thinking step
+  defp contains_thinking_marker?(llm_result) do
+    content = extract_content(llm_result)
+
+    cond do
+      is_nil(content) -> false
+      String.contains?(content, "I need to think") -> true
+      String.contains?(content, "Let me think") -> true
+      String.contains?(content, "Thinking:") -> true
+      String.match?(content, ~r/^Step \d+:/i) -> true
+      String.match?(content, ~r/^Thinking step \d+:/i) -> true
+      true -> false
+    end
+  end
+
+  # Check if LLM response suggests continuation of a thinking process
+  defp should_continue_thinking?(llm_result, current_step) do
+    content = extract_content(llm_result)
+
+    if is_nil(content) do
+      false
+    else
+      contains_thinking_phrases?(content) or
+        matches_step_pattern?(content, current_step) or
+        numbered_list_thinking?(content) or
+        starts_with_continuation_phrase?(content)
+    end
+  end
+
+  # Check for explicit phrases indicating continued thinking
+  defp contains_thinking_phrases?(content) do
+    String.contains?(content, "I need to continue thinking") or
+      String.contains?(content, "Let me continue")
+  end
+
+  # Check for patterns that indicate a new step in thinking
+  defp matches_step_pattern?(content, current_step) do
+    String.match?(content, ~r/^Step #{current_step + 1}:/i) or
+      String.match?(content, ~r/^Thinking step #{current_step + 1}:/i)
+  end
+
+  # Check if content looks like a numbered list but not a final answer
+  defp numbered_list_thinking?(content) do
+    String.match?(content, ~r/^\d+\. /) and not String.contains?(content, "final answer")
+  end
+
+  # Check if content starts with phrases suggesting continuation
+  defp starts_with_continuation_phrase?(content) do
+    String.match?(content, ~r/^Next, I/i) or
+      String.match?(content, ~r/^Now I need to/i)
+  end
+
+  # Extract content from an LLM response
+  defp extract_content(llm_result) do
+    case llm_result do
+      %{"content" => content} when is_binary(content) ->
+        content
+
+      %{"message" => %{"content" => content}} when is_binary(content) ->
+        content
+
+      %{"choices" => [%{"message" => %{"content" => content}} | _]} when is_binary(content) ->
+        content
+
+      %{"choices" => [%{"text" => content} | _]} when is_binary(content) ->
+        content
+
+      # For OpenAI-specific format
+      %{"choices" => [first | _]} ->
+        get_in(first, ["message", "content"]) || ""
+
+      # Fallback
+      _ ->
+        ""
+    end
+  end
+
+  # Extract tool calls from an LLM response
+  defp extract_tool_calls(llm_result) do
+    case llm_result do
+      # Standard format with direct tool_calls
+      %{"tool_calls" => tool_calls} when is_list(tool_calls) ->
+        parse_tool_calls(tool_calls)
+
+      # OpenAI-specific format with choices
+      %{"choices" => [%{"message" => %{"tool_calls" => tool_calls}} | _]} when is_list(tool_calls) ->
+        parse_tool_calls(tool_calls)
+
+      # No tool calls found
+      _ ->
+        []
+    end
+  end
+
+  # Parse a list of tool calls into a standardized format
+  defp parse_tool_calls(tool_calls) do
+    Enum.map(tool_calls, &parse_single_tool_call/1)
+  end
+
+  # Parse a single tool call into a standardized format
+  defp parse_single_tool_call(tool_call) do
+    args_json = get_in(tool_call, ["function", "arguments"]) || "{}"
+    name = get_in(tool_call, ["function", "name"]) || ""
+
+    %{
+      name: name,
+      arguments: parse_arguments(args_json)
+    }
+  end
+
+  # Parse arguments from JSON string
+  defp parse_arguments(args_json) do
+    case Jason.decode(args_json) do
+      {:ok, decoded} -> decoded
+      _ -> %{}
+    end
   end
 end

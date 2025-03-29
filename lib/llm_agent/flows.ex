@@ -7,6 +7,7 @@ defmodule LLMAgent.Flows do
   appropriate handlers, and configures initial state.
   """
 
+  alias AgentForge
   alias LLMAgent.{Handlers, Signals, Store}
 
   @doc """
@@ -42,7 +43,8 @@ defmodule LLMAgent.Flows do
     # Register tools with the system
     register_tools(tools)
 
-    # Create flow with standard handlers
+    # Create flow with standard handlers, using our established pattern
+    # This ensures backward compatibility while leveraging AgentForge capabilities
     flow = fn signal, state ->
       state
       |> handle_with(&Handlers.message_handler/2, signal)
