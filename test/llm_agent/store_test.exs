@@ -7,15 +7,37 @@ defmodule LLMAgent.StoreTest do
   use ExUnit.Case
 
   alias LLMAgent.Store
+  alias AgentForge.Store, as: AFStore
+
+  setup do
+    # 使用唯一存储名称避免测试间干扰
+    store_name = String.to_atom("store_test_#{System.unique_integer([:positive])}")
+    store = Store.new(%{}, name: store_name)
+
+    on_exit(fn ->
+      # 清理存储如果仍然存在
+      case Process.whereis(store_name) do
+        nil -> :ok
+        pid -> Process.exit(pid, :normal)
+      end
+    end)
+
+    %{store: store}
+  end
 
   describe "store initialization" do
-    test "creates a new store with default values" do
-      store = Store.new()
+    test "creates a new store with default values", %{store: store} do
+      # Store is now a process name
+      assert is_atom(store)
 
-      assert is_map(store)
-      assert Map.get(store, :history) == []
-      assert Map.get(store, :thoughts) == []
-      assert Map.get(store, :tool_calls) == []
+      {:ok, history} = AFStore.get(store, :history)
+      assert history == []
+
+      {:ok, thoughts} = AFStore.get(store, :thoughts)
+      assert thoughts == []
+
+      {:ok, tool_calls} = AFStore.get(store, :tool_calls)
+      assert tool_calls == []
     end
 
     test "creates a new store with initial values" do
@@ -24,53 +46,61 @@ defmodule LLMAgent.StoreTest do
         available_tools: [%{name: "calculator", description: "Performs calculations"}]
       }
 
-      store = Store.new(initial_state)
+      store_name = String.to_atom("store_test_init_values")
+      store = Store.new(initial_state, name: store_name)
 
-      assert is_map(store)
+      # Store is now a process name
+      assert is_atom(store)
 
-      assert Map.get(store, :history) == [
+      {:ok, history} = AFStore.get(store, :history)
+
+      assert history == [
                %{role: "system", content: "You are a helpful assistant"}
              ]
 
-      assert Map.get(store, :thoughts) == []
+      {:ok, thoughts} = AFStore.get(store, :thoughts)
+      assert thoughts == []
 
-      assert Map.get(store, :available_tools) == [
+      {:ok, available_tools} = AFStore.get(store, :available_tools)
+
+      assert available_tools == [
                %{name: "calculator", description: "Performs calculations"}
              ]
+
+      # 清理测试后创建的 store
+      Process.exit(Process.whereis(store_name), :normal)
     end
   end
 
   describe "message management" do
-    test "adds a user message to history" do
-      store = Store.new()
+    test "adds a user message to history", %{store: store} do
       message = "Hello, assistant"
-      updated_store = Store.add_message(store, "user", message)
+      :ok = Store.add_message(store, "user", message)
 
-      assert length(Map.get(updated_store, :history)) == 1
-      [added_message] = Map.get(updated_store, :history)
+      {:ok, history} = AFStore.get(store, :history)
+      assert length(history) == 1
+      [added_message] = history
       assert added_message.role == "user"
       assert added_message.content == message
     end
 
-    test "adds an assistant message to history" do
-      store = Store.new()
+    test "adds an assistant message to history", %{store: store} do
       message = "I can help with that"
-      updated_store = Store.add_message(store, "assistant", message)
+      :ok = Store.add_message(store, "assistant", message)
 
-      assert length(Map.get(updated_store, :history)) == 1
-      [added_message] = Map.get(updated_store, :history)
+      {:ok, history} = AFStore.get(store, :history)
+      assert length(history) == 1
+      [added_message] = history
       assert added_message.role == "assistant"
       assert added_message.content == message
     end
 
-    test "gets LLM history in the correct format" do
-      store =
-        Store.new()
-        |> Store.add_message("system", "You are a helpful assistant")
-        |> Store.add_message("user", "Hello")
-        |> Store.add_message("assistant", "Hi there")
+    test "gets LLM history in the correct format", %{store: store} do
+      :ok = Store.add_message(store, "system", "You are a helpful assistant")
+      :ok = Store.add_message(store, "user", "Hello")
+      :ok = Store.add_message(store, "assistant", "Hi there")
 
-      history = store.history
+      history = Store.get_llm_history(store)
 
       assert length(history) == 3
 
@@ -81,39 +111,35 @@ defmodule LLMAgent.StoreTest do
   end
 
   describe "thought management" do
-    test "adds a thought" do
-      store = Store.new()
+    test "adds a thought", %{store: store} do
       thought = "I should answer the user's question directly"
-      updated_store = Store.add_thought(store, thought)
+      :ok = Store.add_thought(store, thought)
 
-      thoughts = Map.get(updated_store, :thoughts)
+      {:ok, thoughts} = AFStore.get(store, :thoughts)
       assert length(thoughts) == 1
       assert List.first(thoughts) == thought
     end
 
-    test "gets all thoughts" do
+    test "gets all thoughts", %{store: store} do
       thoughts = ["First thought", "Second thought"]
-      store = Store.new()
 
-      updated_store =
-        Enum.reduce(thoughts, store, fn thought, acc ->
-          Store.add_thought(acc, thought)
-        end)
+      Enum.each(thoughts, fn thought ->
+        :ok = Store.add_thought(store, thought)
+      end)
 
-      retrieved_thoughts = updated_store.thoughts
+      retrieved_thoughts = Store.get_thoughts(store)
       assert retrieved_thoughts == thoughts
     end
   end
 
   describe "tool call management" do
-    test "adds a tool call" do
-      store = Store.new()
+    test "adds a tool call", %{store: store} do
       tool_name = "calculator"
       args = %{expression: "1 + 2"}
       result = %{output: 3}
-      updated_store = Store.add_tool_call(store, tool_name, args, result)
+      :ok = Store.add_tool_call(store, tool_name, args, result)
 
-      tool_calls = Map.get(updated_store, :tool_calls, [])
+      {:ok, tool_calls} = AFStore.get(store, :tool_calls)
       assert length(tool_calls) == 1
       [tool_call] = tool_calls
       assert tool_call.name == tool_name

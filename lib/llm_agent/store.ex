@@ -2,43 +2,122 @@ defmodule LLMAgent.Store do
   @moduledoc """
   Manages state for LLM agent conversations.
 
-  This module provides helpers for working with the LLM agent state, including
-  managing conversation history, thoughts, tool calls, and tasks. It follows
-  AgentForge's immutable state pattern.
+  This module extends AgentForge.Store to provide helpers specific to LLM agent state,
+  including managing conversation history, thoughts, tool calls, and tasks.
+  It leverages AgentForge's GenServer-based state management while adding
+  LLM-specific abstractions.
   """
 
+  @default_store_name __MODULE__
+
   @doc """
-  Creates a new store with default values.
+  Starts the LLMAgent store process with an optional name.
+
+  ## Parameters
+
+  - `opts` - Options to pass to the store, including the store name
+
+  ## Returns
+
+  The result of GenServer.start_link/3 from AgentForge.Store
+
+  ## Examples
+
+      iex> {:ok, _pid} = LLMAgent.Store.start_link()
+      iex> {:ok, _pid} = LLMAgent.Store.start_link(name: :my_llm_store)
+  """
+  def start_link(opts \\ []) do
+    name = Keyword.get(opts, :name, @default_store_name)
+
+    initial_state = %{
+      history: [],
+      thoughts: [],
+      tool_calls: [],
+      current_tasks: [],
+      preferences: %{}
+    }
+
+    # Pass any additional options to AgentForge.Store
+    store_opts = Keyword.put(opts, :name, name)
+
+    # Start the AgentForge.Store with our initial state
+    result = AgentForge.Store.start_link(store_opts)
+
+    # Initialize our default values
+    case result do
+      {:ok, _pid} ->
+        Enum.each(initial_state, fn {key, value} ->
+          # Only set if not already present
+          case AgentForge.Store.get(name, key) do
+            {:error, :not_found} -> AgentForge.Store.put(name, key, value)
+            _ -> :ok
+          end
+        end)
+
+      _ ->
+        :ok
+    end
+
+    result
+  end
+
+  @doc """
+  Creates or initializes a new store with default values.
+
+  If the store process doesn't exist, starts a new one.
+  If it does exist, ensures it has the default keys initialized.
 
   ## Parameters
 
   - `attrs` - A map of attributes to merge with the default store
+  - `opts` - Options for the store, including the store name
 
   ## Returns
 
-  A new store map with default values merged with the provided attributes.
+  The name of the initialized store.
 
   ## Examples
 
       iex> store = LLMAgent.Store.new()
-      iex> is_list(store.history) and is_list(store.thoughts) and is_list(store.tool_calls)
+      iex> {:ok, history} = AgentForge.Store.get(store, :history)
+      iex> is_list(history)
       true
       
       iex> store = LLMAgent.Store.new(%{user_id: "123"})
-      iex> store.user_id
-      "123"
+      iex> {:ok, "123"} = AgentForge.Store.get(store, :user_id)
   """
-  def new(attrs \\ %{}) do
-    Map.merge(
-      %{
-        history: [],
-        thoughts: [],
-        tool_calls: [],
-        current_tasks: [],
-        preferences: %{}
-      },
-      attrs
-    )
+  def new(attrs \\ %{}, opts \\ []) do
+    name = Keyword.get(opts, :name, @default_store_name)
+
+    # Ensure store exists
+    case Process.whereis(name) do
+      nil -> start_link(Keyword.put(opts, :name, name))
+      _ -> :ok
+    end
+
+    # Initialize with default values and merge with attrs
+    default_state = %{
+      history: [],
+      thoughts: [],
+      tool_calls: [],
+      current_tasks: [],
+      preferences: %{}
+    }
+
+    # Set default values if not already present
+    Enum.each(default_state, fn {key, value} ->
+      case AgentForge.Store.get(name, key) do
+        {:error, :not_found} -> AgentForge.Store.put(name, key, value)
+        _ -> :ok
+      end
+    end)
+
+    # Merge with attrs
+    Enum.each(attrs, fn {key, value} ->
+      AgentForge.Store.put(name, key, value)
+    end)
+
+    name
   end
 
   @doc """
@@ -46,22 +125,25 @@ defmodule LLMAgent.Store do
 
   ## Parameters
 
-  - `state` - The current store state
+  - `store` - The store process name or pid
   - `role` - The role of the message (e.g., "user", "assistant", "system")
   - `content` - The content of the message
 
   ## Returns
 
-  An updated state with the new message added to history.
+  :ok if the message was added successfully
 
   ## Examples
 
-      iex> state = LLMAgent.Store.new()
-      iex> state = LLMAgent.Store.add_message(state, "user", "Hello")
-      iex> [%{role: "user", content: "Hello"}] = state.history
+      iex> store = LLMAgent.Store.new()
+      iex> :ok = LLMAgent.Store.add_message(store, "user", "Hello")
+      iex> {:ok, history} = AgentForge.Store.get(store, :history)
+      iex> [%{role: "user", content: "Hello"}] = history
   """
-  def add_message(state, role, content) do
-    Map.update(state, :history, [], &(&1 ++ [%{role: role, content: content}]))
+  def add_message(store \\ @default_store_name, role, content) do
+    AgentForge.Store.update(store, :history, [], fn history ->
+      history ++ [%{role: role, content: content}]
+    end)
   end
 
   @doc """
@@ -69,21 +151,24 @@ defmodule LLMAgent.Store do
 
   ## Parameters
 
-  - `state` - The current store state
+  - `store` - The store process name or pid
   - `thought` - The thought content
 
   ## Returns
 
-  An updated state with the new thought added to the thoughts list.
+  :ok if the thought was added successfully
 
   ## Examples
 
-      iex> state = LLMAgent.Store.new()
-      iex> state = LLMAgent.Store.add_thought(state, "I should look up stock prices")
-      iex> ["I should look up stock prices"] = state.thoughts
+      iex> store = LLMAgent.Store.new()
+      iex> :ok = LLMAgent.Store.add_thought(store, "I should look up stock prices")
+      iex> {:ok, thoughts} = AgentForge.Store.get(store, :thoughts)
+      iex> ["I should look up stock prices"] = thoughts
   """
-  def add_thought(state, thought) do
-    Map.update(state, :thoughts, [], &(&1 ++ [thought]))
+  def add_thought(store \\ @default_store_name, thought) do
+    AgentForge.Store.update(store, :thoughts, [], fn thoughts ->
+      thoughts ++ [thought]
+    end)
   end
 
   @doc """
@@ -91,23 +176,26 @@ defmodule LLMAgent.Store do
 
   ## Parameters
 
-  - `state` - The current store state
+  - `store` - The store process name or pid
   - `name` - The name of the tool
   - `args` - The arguments passed to the tool
   - `result` - The result of the tool call
 
   ## Returns
 
-  An updated state with the new tool call record added.
+  :ok if the tool call was added successfully
 
   ## Examples
 
-      iex> state = LLMAgent.Store.new()
-      iex> state = LLMAgent.Store.add_tool_call(state, "get_weather", %{city: "New York"}, %{temp: 72})
-      iex> [%{name: "get_weather", args: %{city: "New York"}, result: %{temp: 72}}] = state.tool_calls
+      iex> store = LLMAgent.Store.new()
+      iex> :ok = LLMAgent.Store.add_tool_call(store, "get_weather", %{city: "New York"}, %{temp: 72})
+      iex> {:ok, tool_calls} = AgentForge.Store.get(store, :tool_calls)
+      iex> [%{name: "get_weather", args: %{city: "New York"}, result: %{temp: 72}}] = tool_calls
   """
-  def add_tool_call(state, name, args, result) do
-    Map.update(state, :tool_calls, [], &(&1 ++ [%{name: name, args: args, result: result}]))
+  def add_tool_call(store \\ @default_store_name, name, args, result) do
+    AgentForge.Store.update(store, :tool_calls, [], fn tool_calls ->
+      tool_calls ++ [%{name: name, args: args, result: result}]
+    end)
   end
 
   @doc """
@@ -115,26 +203,28 @@ defmodule LLMAgent.Store do
 
   ## Parameters
 
-  - `state` - The current store state
+  - `store` - The store process name or pid
   - `max_length` - The maximum number of history entries to return (default: 10)
 
   ## Returns
 
   A list of history entries, limited to the specified maximum length.
+  Returns empty list if history can't be retrieved.
 
   ## Examples
 
-      iex> state = LLMAgent.Store.new()
-      iex> state = LLMAgent.Store.add_message(state, "system", "You are a helpful assistant.")
-      iex> state = LLMAgent.Store.add_message(state, "user", "Hello")
-      iex> history = LLMAgent.Store.get_llm_history(state)
+      iex> store = LLMAgent.Store.new()
+      iex> :ok = LLMAgent.Store.add_message(store, "system", "You are a helpful assistant.")
+      iex> :ok = LLMAgent.Store.add_message(store, "user", "Hello")
+      iex> history = LLMAgent.Store.get_llm_history(store)
       iex> length(history) == 2
       true
   """
-  def get_llm_history(state, max_length \\ 10) do
-    state
-    |> Map.get(:history, [])
-    |> Enum.take(-max_length)
+  def get_llm_history(store \\ @default_store_name, max_length \\ 10) do
+    case AgentForge.Store.get(store, :history) do
+      {:ok, history} -> Enum.take(history, -max_length)
+      _ -> []
+    end
   end
 
   @doc """
@@ -142,23 +232,27 @@ defmodule LLMAgent.Store do
 
   ## Parameters
 
-  - `state` - The current store state
+  - `store` - The store process name or pid
 
   ## Returns
 
   A list of thoughts from the current processing cycle.
+  Returns empty list if thoughts can't be retrieved.
 
   ## Examples
 
-      iex> state = LLMAgent.Store.new()
-      iex> state = LLMAgent.Store.add_thought(state, "First thought")
-      iex> state = LLMAgent.Store.add_thought(state, "Second thought")
-      iex> thoughts = LLMAgent.Store.get_thoughts(state)
+      iex> store = LLMAgent.Store.new()
+      iex> :ok = LLMAgent.Store.add_thought(store, "First thought")
+      iex> :ok = LLMAgent.Store.add_thought(store, "Second thought")
+      iex> thoughts = LLMAgent.Store.get_thoughts(store)
       iex> length(thoughts) == 2
       true
   """
-  def get_thoughts(state) do
-    Map.get(state, :thoughts, [])
+  def get_thoughts(store \\ @default_store_name) do
+    case AgentForge.Store.get(store, :thoughts) do
+      {:ok, thoughts} -> thoughts
+      _ -> []
+    end
   end
 
   @doc """
@@ -166,22 +260,25 @@ defmodule LLMAgent.Store do
 
   ## Parameters
 
-  - `state` - The current store state
+  - `store` - The store process name or pid
   - `task` - The task to add
 
   ## Returns
 
-  An updated state with the new task added to the current tasks list.
+  :ok if the task was added successfully
 
   ## Examples
 
-      iex> state = LLMAgent.Store.new()
+      iex> store = LLMAgent.Store.new()
       iex> task = %{id: "task_123", type: "analysis", status: "running"}
-      iex> state = LLMAgent.Store.add_task(state, task)
-      iex> [%{id: "task_123"}] = state.current_tasks
+      iex> :ok = LLMAgent.Store.add_task(store, task)
+      iex> {:ok, tasks} = AgentForge.Store.get(store, :current_tasks)
+      iex> [%{id: "task_123"}] = tasks
   """
-  def add_task(state, task) do
-    Map.update(state, :current_tasks, [], &(&1 ++ [task]))
+  def add_task(store \\ @default_store_name, task) do
+    AgentForge.Store.update(store, :current_tasks, [], fn tasks ->
+      tasks ++ [task]
+    end)
   end
 
   @doc """

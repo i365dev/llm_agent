@@ -326,8 +326,10 @@ end
 # ---- MAIN EXAMPLE SCRIPT ----
 
 alias LLMAgent.Examples.InvestmentTools
+alias AgentForge.Store
+alias LLMAgent.{Signals, Store}
 
-# Define tool definitions for the AgentForge workflow
+# Define tool definitions for the LLMAgent workflow
 defmodule LLMAgent.Examples.InvestmentTools.Tools do
   @moduledoc """
   Tool definitions for the investment portfolio example.
@@ -454,95 +456,123 @@ defmodule LLMAgent.Examples.InvestmentTools.Tools do
   end
 end
 
-# Note: In a real application, we would use the actual LLMAgent.Flows API
-# We'd create a flow with the tools and system prompt, then run the flow
-# For example:
+# This is how you would normally use LLMAgent's API in a real application:
+#
+# 1. Define your system prompt and tools
+# system_prompt = LLMAgent.Examples.InvestmentTools.Tools.get_system_prompt()
+# tools = LLMAgent.Examples.InvestmentTools.Tools.get_tools()
+#
+# 2. Create a conversation flow
 # {flow, initial_state} = LLMAgent.Flows.conversation(system_prompt, tools)
-# AgentForge.run(flow, initial_state, user_message: "Create a retirement ETF portfolio for me.")
+#
+# 3. Create a user message signal
+# user_message = Signals.user_message("Create a retirement ETF portfolio for me.")
+#
+# 4. Run the flow with an LLM backend (would be handled by LLMAgent internally)
+# result = LLMAgent.run(flow, user_message, initial_state)
 
-# This example demonstrates LLMAgent's dynamic workflow capabilities
+# This example demonstrates LLMAgent's API structure without using an actual LLM
 defmodule LLMAgent.Examples.InvestmentDemo do
   @moduledoc """
-  Demonstrates how LLMAgent can handle multi-step investment portfolio workflows
+  Demonstrates how LLMAgent's API can be used to build multi-step investment portfolio workflows
   with dynamic decision-making based on context and user input.
+  
+  NOTE: This example uses mock LLM responses rather than calling a real LLM.
+  In a real implementation, LLMAgent would handle the LLM integration.
   """
   
   alias LLMAgent.Examples.InvestmentTools.Tools
   
   @doc """
-  Run the investment portfolio demo with dynamic tool selection and state management
-  that simulates the way AgentForge and LLMAgent would handle this conversation.
+  Run the investment portfolio demo using LLMAgent's API structure, but with mock LLM responses.
+  This demonstrates the intended usage of LLMAgent without requiring a real LLM connection.
   """
   def run do
-    # Initialize conversation state (similar to AgentForge.Store)
+    # Setup tools and system prompt - this is part of how you'd use LLMAgent's API
+    system_prompt = Tools.get_system_prompt()
+    tools = Tools.get_tools()
+    
+    # In a real app, you'd create a flow and initial state like this:
+    # {flow, initial_state} = LLMAgent.Flows.conversation(system_prompt, tools)
+    
+    # For demonstration, we'll manually initialize a state object similar to what LLMAgent would use
     initial_state = %{
-      history: [],
-      available_tools: Tools.get_tools(),
+      system_prompt: system_prompt,
+      tools: tools,
+      messages: [],
       portfolio: nil,
       etfs: [],
       backtest_results: nil
     }
     
-    IO.puts("\n=== Investment Portfolio Example ===\n")
+    IO.puts("\n=== Investment Portfolio Example (Using LLMAgent API Structure) ===\n")
+    IO.puts("NOTE: This example uses mock responses to demonstrate the API pattern.\n")
     
-    # First user message simulation
+    # First user message - In a real app, this would be passed to LLMAgent.run
     first_message = "Create a retirement ETF portfolio for me."
     IO.puts("User: #{first_message}\n")
     
-    # Process first message - this simulates AgentForge.run with dynamic tool selection
+    # In a real app: result = LLMAgent.run(flow, Signals.user_message(first_message), state)
+    # But here we simulate the LLM response and tool selection
     updated_state = process_message(initial_state, first_message)
     
-    # Second user message - feedback on the portfolio
+    # Second user message - continuing the conversation with state maintained
     second_message = "Can you reduce the risk level? I'm concerned about market volatility."
     IO.puts("\nUser: #{second_message}\n")
     
-    # Process second message - notice how we pass the updated state
+    # In a real app: result = LLMAgent.run(flow, Signals.user_message(second_message), updated_state)
+    # But again, we use mock responses for demonstration
     final_state = process_message(updated_state, second_message)
     
     # Example completion
     IO.puts("\n=== Example Complete ===")
-    IO.puts("This demonstration shows how LLMAgent enables truly dynamic workflows")
-    IO.puts("where the LLM decides the next steps based on context and user input.")
+    IO.puts("This demonstration shows how LLMAgent's API can be used to build dynamic workflows")
+    IO.puts("where the LLM decides which tools to call based on context and user input.")
     IO.puts("")
-    IO.puts("Key concepts demonstrated:")
-    IO.puts("1. State persistence across interactions")
-    IO.puts("2. Dynamic tool selection based on context")
-    IO.puts("3. Multi-step reasoning with intermediate results")
-    IO.puts("4. Adaptive responses to user feedback")
+    IO.puts("Key LLMAgent API concepts demonstrated:")
+    IO.puts("1. Creating flows with tools and system prompts")
+    IO.puts("2. Maintaining conversation state across interactions")
+    IO.puts("3. Using signals to process user messages")
+    IO.puts("4. Handling tool calls and responses through the LLMAgent abstraction")
     
     final_state
   end
   
-  # Simulate the LLM's message processing and dynamic tool selection
-  # Process a user message by simulating LLM decision-making.
-  # Similar to how AgentForge would handle messages in a real implementation,
-  # this function analyzes the message, selects appropriate tools, and updates state.
-  #
+  # Mock implementation of an LLM-based message processor
+  # This simulates how LLMAgent would process messages through the LLM and handle tool calls
+  # In a real implementation, LLMAgent would handle all of this internally
+  # 
   # Returns updated state with tool results and conversation history.
   @spec process_message(map(), String.t()) :: map()
   defp process_message(state, message) do
-    # In a real implementation, this would call the LLM to analyze the message
-    # and decide which tool to use. Here we simulate that decision process.
-    {tool_name, tool_args, thinking} = simulate_llm_tool_selection(message, state)
+    # In a real implementation, LLMAgent would:
+    # 1. Create a user_message signal
+    # 2. Pass it to the LLM through a provider
+    # 3. Process the response to identify tool calls
+    #
+    # Here we simulate those steps with mock responses
+    {tool_name, tool_args, thinking} = mock_llm_response(message, state)
     
-    # Show the "thinking" process that would happen in the LLM
+    # This would be handled by LLMAgent.Handlers.thinking_handler in a real implementation
     IO.puts("Assistant thinking: #{thinking}\n")
     
     if tool_name do
-      # Find the selected tool
-      tool = Enum.find(state.available_tools, fn t -> t.name == tool_name end)
+      # In a real implementation, LLMAgent would handle tool dispatch
+      # Here we manually find the tool - LLMAgent.Handlers.tool_call_handler would do this
+      tool = Enum.find(state.tools, fn t -> t.name == tool_name end)
       
-      # Execute the tool with arguments
+      # Tool execution would be handled by LLMAgent.Handlers.tool_execution_handler
       IO.puts("Executing tool: #{tool_name}")
       result = tool.execute.(tool_args)
       
-      # Update state with result
+      # This state update would happen automatically within LLMAgent's signal flow
       updated_state = update_state(state, tool_name, result)
       
-      # Process the tool result (simulating LLM analyzing result and deciding next action)
+      # This would be handled by LLMAgent.Handlers.tool_result_handler
       process_tool_result(updated_state, tool_name, result, message)
     else
-      # If no tool was selected, generate a final response
+      # In a real implementation, LLMAgent would handle the final response generation
+      # through the appropriate signal handlers
       generate_final_response(state, message)
       state
     end
@@ -593,7 +623,8 @@ defmodule LLMAgent.Examples.InvestmentDemo do
         risk_profile = determine_risk_profile(original_message)
         
         # Execute next tool
-        next_tool = Enum.find(state.available_tools, fn t -> t.name == "portfolio_constructor" end)
+        {:ok, available_tools} = AgentForge.Store.get(state, :available_tools)
+        next_tool = Enum.find(available_tools, fn t -> t.name == "portfolio_constructor" end)
         IO.puts("Executing tool: portfolio_constructor")
         portfolio_result = next_tool.execute.(%{"risk_profile" => risk_profile})
         
@@ -617,7 +648,8 @@ defmodule LLMAgent.Examples.InvestmentDemo do
         end)
         
         # Execute backtesting
-        next_tool = Enum.find(state.available_tools, fn t -> t.name == "portfolio_backtester" end)
+        {:ok, available_tools} = AgentForge.Store.get(state, :available_tools)
+        next_tool = Enum.find(available_tools, fn t -> t.name == "portfolio_backtester" end)
         IO.puts("\nExecuting tool: portfolio_backtester")
         backtest_result = next_tool.execute.(%{"portfolio" => result})
         
@@ -653,11 +685,16 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     end
   end
 
-  # Simulate LLM's decision-making process for selecting a tool
-  @spec simulate_llm_tool_selection(String.t(), map()) :: {String.t() | nil, map() | nil, String.t()}
-  defp simulate_llm_tool_selection(message, state) do
+  # Create a mock LLM response that simulates what a real LLM would decide
+  # This replaces calling a real LLM in a LLMAgent implementation
+  @spec mock_llm_response(String.t(), map()) :: {String.t() | nil, map() | nil, String.t()}
+  defp mock_llm_response(message, state) do
+    # In a real implementation, LLMAgent would send the message to an LLM
+    # and interpret the response to determine which tool to call
+    # 
+    # Here we use pattern matching to simulate what the LLM would decide
     cond do
-      # Initial portfolio request - decide to screen ETFs first
+      # Initial portfolio request - the LLM would choose to screen ETFs first
       String.contains?(String.downcase(message), "portfolio") and state.portfolio == nil ->
         {
           "etf_screener", 
@@ -665,7 +702,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
           "The user is asking for a retirement ETF portfolio. I should first get a list of available ETFs using the etf_screener tool."
         }
       
-      # Risk reduction request - use portfolio optimizer with lower risk preference  
+      # Risk reduction request - the LLM would choose to optimize the portfolio for lower risk
       String.contains?(String.downcase(message), "risk") and 
       (String.contains?(String.downcase(message), "reduce") or 
        String.contains?(String.downcase(message), "lower") or
@@ -680,7 +717,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
           "The user wants to reduce risk in their portfolio due to concerns about market volatility. I'll use the portfolio_optimizer tool to adjust for lower risk."
         }
       
-      # Risk increase request - use portfolio optimizer with higher risk preference
+      # Risk increase request - the LLM would choose to optimize for higher risk
       String.contains?(String.downcase(message), "risk") and 
       (String.contains?(String.downcase(message), "increase") or 
        String.contains?(String.downcase(message), "higher")) and
@@ -694,7 +731,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
           "The user wants to increase risk in their portfolio. I'll use the portfolio_optimizer tool to adjust for higher risk."
         }
       
-      # General follow-up question about portfolio - no tool needed
+      # General follow-up - the LLM would decide no tool is needed
       state.portfolio != nil ->
         {
           nil,
@@ -702,7 +739,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
           "The user is asking about the existing portfolio. I don't need to use any tools for this, I can respond directly with the information I have."
         }
       
-      # Default case - unclear request
+      # Default case - the LLM would decide to respond directly
       true ->
         {
           nil,
@@ -831,15 +868,30 @@ end
 # 3. Making multi-step decisions with intermediate results
 # 4. Adapting to user feedback
 
-# Run the demo with the new dynamic simulation approach
+# Run the demo with the LLMAgent mock implementation
 LLMAgent.Examples.InvestmentDemo.run()
 
 # Print additional information about extending the example
-IO.puts("\n=== Further Extensions ===\n")
-IO.puts("Try modifying this example to:")
-IO.puts("1. Add additional tools (tax analysis, retirement planning)")
-IO.puts("2. Implement more complex LLM simulation logic")
-IO.puts("3. Integrate with real LLM providers via LLMAgent plugins")
-IO.puts("4. Create a more sophisticated portfolio construction algorithm")
-IO.puts("\nThis example demonstrates the core pattern behind LLMAgent's dynamic workflow capabilities.")
-IO.puts("In a real implementation, the LLM would make the decisions that are simulated here.")
+IO.puts("\n=== How To Use This With a Real LLM ===\n")
+IO.puts("In a real application, instead of using mock responses, you would:")
+IO.puts("1. Install the LLMAgent package and configure an LLM provider")
+IO.puts("2. Use LLMAgent.Flows.conversation() to create your workflow")
+IO.puts("3. Send user messages with Signals.user_message()")
+IO.puts("4. Let LLMAgent handle the LLM interaction and tool execution")
+IO.puts("\nExample real implementation:")
+IO.puts("""  
+  # Configure your LLM provider
+  Application.put_env(:llm_agent, :provider, LLMAgent.Providers.OpenAI)
+  Application.put_env(:llm_agent, :api_key, System.get_env("OPENAI_API_KEY"))
+  
+  # Create your tools and system prompt
+  tools = LLMAgent.Examples.InvestmentTools.Tools.get_tools()
+  system_prompt = LLMAgent.Examples.InvestmentTools.Tools.get_system_prompt()
+  
+  # Create a conversation flow
+  {flow, state} = LLMAgent.Flows.conversation(system_prompt, tools)
+  
+  # Process user messages
+  user_message = "Create a retirement ETF portfolio for me."
+  {:ok, new_state} = LLMAgent.run(flow, Signals.user_message(user_message), state)
+""")
