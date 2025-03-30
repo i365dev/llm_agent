@@ -24,7 +24,7 @@ defmodule MockInvestmentProvider do
   - Client risk preferences
   - Previous tool execution outcomes
 
-  Unlike static DAG workflows, it dynamically chooses the next steps based on 
+  Unlike static DAG workflows, it dynamically chooses the next steps based on
   the evolving context and state.
   """
 
@@ -261,20 +261,6 @@ defmodule MockInvestmentProvider do
                ]
              }}
 
-          "portfolio_backtester" ->
-            {:ok,
-             %{
-               "choices" => [
-                 %{
-                   "message" => %{
-                     "content" =>
-                       "I couldn't complete the detailed backtest. Let me provide a simplified analysis instead.",
-                     "content_only" => true
-                   }
-                 }
-               ]
-             }}
-
           _ ->
             {:ok,
              %{
@@ -476,7 +462,7 @@ defmodule MockInvestmentProvider do
     end
   end
 
-  defp determine_risk_preference(question, current_profile) do
+  defp determine_risk_preference(question, _current_profile) do
     question = String.downcase(question)
 
     cond do
@@ -543,7 +529,7 @@ defmodule MockInvestmentProvider do
   # Response generation functions
   #
 
-  defp generate_contextual_response(context, question) do
+  defp generate_contextual_response(context, _question) do
     cond do
       context.has_portfolio and context.has_backtest ->
         portfolio = context.portfolio
@@ -808,7 +794,7 @@ defmodule LLMAgent.Examples.InvestmentTools do
     fallback = Map.get(params, "fallback", false)
 
     # Use ETFs provided in request or default set
-    provided_etfs = Map.get(params, "etfs", nil)
+    _provided_etfs = Map.get(params, "etfs", nil)
 
     allocations =
       case {risk_profile, fallback} do
@@ -1029,16 +1015,16 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     5. Simulate performance in different market scenarios
 
     When providing recommendations, consider:
-    - Current market conditions: #{Store.get(store_name, :market_volatility)}
-    - Interest rate environment: #{Store.get(store_name, :interest_rate_trend)}
-    - Economic outlook: #{Store.get(store_name, :economic_outlook)}
+    - Current market conditions: #{elem(Store.get(store_name, :market_volatility), 1)}
+    - Interest rate environment: #{elem(Store.get(store_name, :interest_rate_trend), 1)}
+    - Economic outlook: #{elem(Store.get(store_name, :economic_outlook), 1)}
 
     Tailor your analysis approach to the client's knowledge level and goals.
     Present your findings clearly with both technical detail and plain language explanations.
     """
 
     # 5. Create conversation flow with investment tools
-    {flow, state} =
+    {flow, _fresh_state} =
       Flows.tool_agent(
         system_prompt,
         LLMAgent.Examples.InvestmentTools.get_tools(),
@@ -1103,13 +1089,20 @@ defmodule LLMAgent.Examples.InvestmentDemo do
         signal = Signals.user_message(input)
 
         # Process through the investment flow
-        case Flow.process(flow, signal, current_state) do
-          {result, new_state} ->
-            display_response(result)
+        case flow.(signal, current_state) do
+          {:emit, %{type: :response} = response_signal, new_state} ->
+            display_response({:emit, response_signal})
 
             # Store conversation progress in the store for stateful decisions
             Store.put(store_name, :last_client_message, input)
-            store_result_data(store_name, result)
+
+            new_state
+
+          {:emit, %{type: :tool_result} = tool_signal, new_state} ->
+            display_response({:emit, tool_signal})
+
+            # Store tool result data
+            store_result_data(store_name, {:emit, tool_signal})
 
             new_state
 
@@ -1120,6 +1113,10 @@ defmodule LLMAgent.Examples.InvestmentDemo do
             Store.put(store_name, :last_error, error)
 
             current_state
+
+          unexpected ->
+            IO.puts("Unexpected result: #{inspect(unexpected)}")
+            current_state
         end
       end)
     end)
@@ -1128,11 +1125,10 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     IO.puts("\n=== Investment Agent Architecture ===")
 
     IO.puts("""
-
     This example demonstrates how LLMAgent builds dynamic workflows:
 
     1. Signal-Based Decision Making:
-       The agent doesn't follow a predefined DAG, but instead makes decisions 
+       The agent doesn't follow a predefined DAG, but instead makes decisions
        based on evolving context and conversation state.
 
     2. Tool Chaining with LLM Intelligence:
@@ -1140,7 +1136,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
        - Results of previous tool executions
        - Client request analysis
        - Contextual state information
-       
+
     3. Dynamic Path Selection:
        The agent dynamically determines:
        - Which tool to use next
@@ -1150,7 +1146,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
     4. State Management:
        The Store component maintains state across interactions:
-       - #{inspect(Store.get_all(store_name) |> Enum.count())} state keys tracked
+       - #{length(elem(Store.get_all(store_name), 1))} state keys tracked
        - Analysis history preserved
        - Tool results maintained for context
     """)
@@ -1159,36 +1155,37 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     IO.puts("\nTo implement similar agents in your application, follow this pattern:")
 
     IO.puts("""
-
     1. Define domain-specific tools:
-       ```elixir
-       tools = [
-         %{
-           name: "etf_screener",
-           description: "Screen ETFs based on criteria",
-           parameters: %{...},
-           execute: &screen_etfs/1
-         }
-       ]
-       ```
-       
+    ```elixir
+    tools = [
+      %{
+        name: "portfolio_analyzer",
+        description: "Analyze investment portfolios based on risk profile and goals",
+        parameters: %{
+          type: "object",
+          properties: %{
+            risk_profile: %{type: "string", enum: ["Conservative", "Moderate", "Aggressive"]}
+          }
+        }
+      }
+    ]
+    ```
+
     2. Initialize store and create the agent:
-       ```elixir
-       store_name = MyApp.InvestmentStore
-       {:ok, _} = LLMAgent.Store.start_link(name: store_name)
-       {flow, state} = LLMAgent.Flows.tool_agent(system_prompt, tools, store_name: store_name)
-       ```
-       
+    ```elixir
+    store_name = MyApp.InvestmentStore
+    {flow, state} = LLMAgent.Flows.tool_agent(system_prompt, tools, store_name: store_name)
+    ```
+
     3. Process client requests:
-       ```elixir
-       {result, new_state} = AgentForge.Flow.process(flow, Signals.user_message(request), state)
-       ```
-       
+    ```elixir
+    {result, new_state} = AgentForge.Flow.process(flow, Signals.user_message(request), state)
+    ```
+
     4. Access stateful information:
-       ```elixir
-       portfolio = AgentForge.Store.get(store_name, :current_portfolio)
-       history = LLMAgent.Store.get_llm_history(store_name)
-       ```
+    ```elixir
+    portfolio = AgentForge.Store.get(store_name, :current_portfolio)
+    history = LLMAgent.Store.get_llm_history(store_name)
     """)
   end
 
@@ -1196,7 +1193,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
   # Reset store between scenarios
   defp reset_store(store_name) do
-    # Preserve system settings but clear scenario-specific data
+    # Reset store but preserve specific keys
     preserved_keys = [
       :market_volatility,
       :interest_rate_trend,
@@ -1207,13 +1204,12 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     # Save values we want to keep
     preserved_values =
       preserved_keys
-      |> Enum.map(fn key -> {key, Store.get(store_name, key)} end)
+      |> Enum.map(fn key -> {key, elem(Store.get(store_name, key), 1)} end)
       |> Map.new()
 
-    # Clear everything
-    Store.clear(store_name)
+    IO.puts("\n--- Resetting conversation state ---\n")
 
-    # Restore preserved values
+    # We will simply reset the values we want to keep
     Enum.each(preserved_values, fn {key, value} ->
       Store.put(store_name, key, value)
     end)
@@ -1239,7 +1235,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
       "market_simulator" ->
         Store.put(store_name, :market_scenarios, [
-          result | Store.get(store_name, :market_scenarios) || []
+          result | elem(Store.get(store_name, :market_scenarios), 1) || []
         ])
 
       _ ->
