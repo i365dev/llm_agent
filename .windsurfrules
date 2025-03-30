@@ -24,6 +24,7 @@ This is a personal project with a focus on clean architecture and practical impl
 
 ### Naming Conventions
 
+- **English**: Use English for all code, comments, and documentation
 - **Modules**: CamelCase, descriptive of purpose (`LLMAgent.Handlers`, `LLMAgent.Signals`)
 - **Functions**: snake_case, verb-based, descriptive (`process_message`, `execute_tool`)
 - **Variables**: snake_case, clear purpose (`user_message`, `tool_result`)

@@ -77,7 +77,7 @@ defmodule LLMAgent.Handlers do
           content = extract_content(llm_result)
           Logger.debug("MessageHandler - Extracted content: #{inspect(content)}")
 
-          # 确保内容不为空
+          # Ensure content is not empty
           content =
             if content == "" or is_nil(content),
               do: "I don't have a specific answer for that question.",
@@ -420,7 +420,7 @@ defmodule LLMAgent.Handlers do
   end
 
   defp extract_content(llm_result) do
-    # 首先处理可能由元组包装的响应，这是 MockElixirQAProvider 返回的格式
+    # First handle responses wrapped in tuples, which is the format returned by MockElixirQAProvider
     result =
       case llm_result do
         {:ok, data} ->
@@ -431,7 +431,7 @@ defmodule LLMAgent.Handlers do
           other
       end
 
-    # 然后从不同可能的位置提取内容
+    # Then extract content from different possible locations
     case result do
       %{"content" => content} when is_binary(content) ->
         content
@@ -445,19 +445,19 @@ defmodule LLMAgent.Handlers do
       %{"choices" => [%{"text" => content} | _]} when is_binary(content) ->
         content
 
-      # 深层嵌套数据的情况
+      # Handle deeply nested data structure
       %{"choices" => [first | _]} ->
         content = get_in(first, ["message", "content"])
         if is_binary(content), do: content, else: ""
 
-      # 处理包含类型和内容的格式
+      # Handle format containing type and content
       %{"type" => "response", "content" => content} when is_binary(content) ->
         content
 
-      %{"type" => "thinking", "thought" => thought} when is_binary(thought) ->
+      %{"type" => "thinking", "content" => thought} when is_binary(thought) ->
         thought
 
-      # 回退为空字符串
+      # Fallback to empty string
       _ ->
         Logger.warning(
           "Extract_content - Could not extract content from response: #{inspect(result)}"

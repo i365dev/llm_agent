@@ -16,13 +16,13 @@ defmodule MockElixirQAProvider do
   require Logger
 
   def generate_response(messages, _opts \\ []) do
-    # 调试消息格式
+    # Debug message format
     Logger.debug("MockElixirQAProvider - Messages: #{inspect(messages)}")
 
-    # 尝试多种可能的消息格式提取最后一条用户消息
+    # Extract the last user message from various possible message formats
     last_message =
       cond do
-        # 如果是带原子键的消息格式 %{role: "user", content: "..."}
+        # If messages use atom keys format: %{role: "user", content: "..."}
         Enum.any?(messages, fn msg -> is_map(msg) and Map.has_key?(msg, :role) end) ->
           messages
           |> Enum.reverse()
@@ -32,7 +32,7 @@ defmodule MockElixirQAProvider do
             msg -> %{content: msg[:content] || ""}
           end
 
-        # 如果是带字符串键的消息格式 %{"role" => "user", "content" => "..."}
+        # If messages use string keys format: %{"role" => "user", "content" => "..."}
         Enum.any?(messages, fn msg -> is_map(msg) and Map.has_key?(msg, "role") end) ->
           messages
           |> Enum.reverse()
@@ -42,32 +42,25 @@ defmodule MockElixirQAProvider do
             msg -> %{content: msg["content"] || ""}
           end
 
-        # 如果是其他格式，尝试基本的字符串提取
+        # For other formats, try basic string extraction
         true ->
           last_user_message =
             messages
             |> Enum.reverse()
             |> Enum.find(fn msg ->
               is_binary(msg) or
-                (is_map(msg) and
-                   Map.values(msg)
-                   |> Enum.any?(fn v -> is_binary(v) and String.contains?(v, "?") end))
+                (is_map(msg) and Map.values(msg) |> Enum.any?(fn v -> is_binary(v) and String.contains?(v, "?") end))
             end)
 
           case last_user_message do
-            msg when is_binary(msg) ->
-              %{content: msg}
-
+            msg when is_binary(msg) -> %{content: msg}
             msg when is_map(msg) ->
               content =
                 msg
                 |> Map.values()
                 |> Enum.find(fn v -> is_binary(v) end) || ""
-
               %{content: content}
-
-            _ ->
-              %{content: ""}
+            _ -> %{content: ""}
           end
       end
 
@@ -77,14 +70,8 @@ defmodule MockElixirQAProvider do
 
     Logger.debug("MockElixirQAProvider - Extracted question: #{inspect(question)}")
     Logger.debug("MockElixirQAProvider - question_lower: #{inspect(question_lower)}")
-
-    Logger.debug(
-      "MockElixirQAProvider - contains 'elixir': #{String.contains?(question_lower, "elixir")}"
-    )
-
-    Logger.debug(
-      "MockElixirQAProvider - contains 'what is': #{String.contains?(question_lower, "what is")}"
-    )
+    Logger.debug("MockElixirQAProvider - contains 'elixir': #{String.contains?(question_lower, "elixir")}")
+    Logger.debug("MockElixirQAProvider - contains 'what is': #{String.contains?(question_lower, "what is")}")
 
     # Simulate LLM response format
     response =
