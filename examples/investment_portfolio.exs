@@ -562,10 +562,21 @@ defmodule LLMAgent.Examples.InvestmentDemo do
   end
 
   # Display different types of responses
-  defp display_response({:emit, %{type: :response} = signal}), do: IO.puts("Advisor: #{signal.data}")
-  defp display_response({:emit, %{type: :tool_call} = signal}), do: IO.puts("Running analysis: #{signal.data.name}")
-  defp display_response({:emit, %{type: :tool_result} = signal}), do: IO.puts("Analysis complete: #{format_tool_result(signal.data.name, Jason.encode!(signal.data.result))}")
-  defp display_response({:emit, %{type: :error} = signal}), do: IO.puts("Error: #{signal.data.message}")
+  defp display_response({:emit, %{type: :response} = signal}),
+    do: IO.puts("Advisor: #{signal.data}")
+
+  defp display_response({:emit, %{type: :tool_call} = signal}),
+    do: IO.puts("Running analysis: #{signal.data.name}")
+
+  defp display_response({:emit, %{type: :tool_result} = signal}),
+    do:
+      IO.puts(
+        "Analysis complete: #{format_tool_result(signal.data.name, Jason.encode!(signal.data.result))}"
+      )
+
+  defp display_response({:emit, %{type: :error} = signal}),
+    do: IO.puts("Error: #{signal.data.message}")
+
   defp display_response({:halt, response}), do: IO.puts("Final response: #{inspect(response)}")
   defp display_response({:skip, _}), do: nil
   defp display_response(other), do: IO.puts("Unexpected response: #{inspect(other)}")

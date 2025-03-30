@@ -47,6 +47,7 @@ defmodule LLMAgent.FlowsTest do
 
     test "handles conversation with tools", %{store_name: store_name} do
       system_prompt = "You are a calculator assistant"
+
       tools = [
         %{
           name: "calculator",
@@ -57,6 +58,7 @@ defmodule LLMAgent.FlowsTest do
           end
         }
       ]
+
       options = [store_name: store_name]
 
       {_flow, state} = Flows.conversation(system_prompt, tools, options)
@@ -167,6 +169,7 @@ defmodule LLMAgent.FlowsTest do
   describe "tool_agent/3" do
     test "creates tool agent with store", %{store_name: store_name} do
       system_prompt = "You are a tool-using assistant"
+
       tools = [
         %{
           name: "test_tool",
@@ -174,6 +177,7 @@ defmodule LLMAgent.FlowsTest do
           execute: fn _args -> %{result: "test"} end
         }
       ]
+
       options = [store_name: store_name]
 
       {flow, state} = Flows.tool_agent(system_prompt, tools, options)
@@ -192,6 +196,7 @@ defmodule LLMAgent.FlowsTest do
   describe "middleware and flow mapping" do
     test "applies middleware to flow", %{store_name: store_name} do
       flow = fn signal, state -> {{:emit, signal}, state} end
+
       middleware = fn signal, state, continue ->
         {result, new_state} = continue.(signal, state)
         {result, Map.put(new_state, :middleware_applied, true)}
