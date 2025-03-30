@@ -212,6 +212,12 @@ end
 - [Custom Agents](https://hexdocs.pm/llm_agent/custom_agents.html)
 - [API Reference](https://hexdocs.pm/llm_agent/api-reference.html)
 
+## Examples
+
+- [Tool Using Agent](examples/tool_using_agent.exs)
+- [Simple QA Agent](examples/simple_qa_agent.exs)
+- [Investment Agent](examples/investment_portfolio.exs)
+
 ## Contributing
 
 We welcome contributions from the community! Please see our [Contributing Guide](CONTRIBUTING.md) for more information on how to get involved.
