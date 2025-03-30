@@ -182,7 +182,6 @@ defmodule MockInvestmentProvider do
   end
 
   # Helper functions for LLM decision simulation
-
   defp should_create_portfolio?(question) do
     question = String.downcase(question)
     String.contains?(question, ["portfolio", "invest", "etf"])
@@ -318,7 +317,6 @@ defmodule LLMAgent.Examples.InvestmentTools do
   end
 
   # Tool implementation functions
-
   def screen_etfs(_criteria) do
     # Mock ETF data
     etfs = [
@@ -420,7 +418,6 @@ defmodule LLMAgent.Examples.InvestmentTools do
   end
 
   # Helper functions
-
   defp calculate_expected_return(allocations) do
     returns = %{
       "VTI" => 10.2,
@@ -439,6 +436,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
   Demonstrates a sophisticated investment portfolio advisor built with LLMAgent.
   """
 
+  alias AgentForge.Flow
   alias LLMAgent.{Flows, Signals, Store}
 
   def run do
@@ -446,7 +444,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     Application.put_env(:llm_agent, :provider, MockInvestmentProvider)
 
     # 2. Create store for this example
-    store_name = :investment_advisor_store
+    store_name = :"investment_advisor_store_#{System.unique_integer([:positive])}"
     _store = Store.start_link(name: store_name)
 
     # 3. Create system prompt for investment advisor
@@ -483,24 +481,25 @@ defmodule LLMAgent.Examples.InvestmentDemo do
       "What's the expected return on this portfolio?"
     ]
 
-    # Process each interaction
-    Enum.each(sample_conversation, fn input ->
-      IO.puts("\nClient: #{input}")
+    # Process each interaction while maintaining state
+    state =
+      Enum.reduce(sample_conversation, state, fn input, current_state ->
+        IO.puts("\nClient: #{input}")
 
-      # Create user message signal
-      signal = Signals.user_message(input)
+        # Create user message signal
+        signal = Signals.user_message(input)
 
-      # Process through the investment flow
-      case LLMAgent.process(flow, signal, state) do
-        {:ok, response, _new_state} ->
-          # Display response
-          display_response(response)
+        # Process through the investment flow
+        case Flow.process(flow, signal, current_state) do
+          {result, new_state} ->
+            display_response(result)
+            new_state
 
-        {:error, error, _state} ->
-          # Display error
-          IO.puts("Error: #{error}")
-      end
-    end)
+          {:error, error} ->
+            IO.puts("Error: #{error}")
+            current_state
+        end
+      end)
 
     # 6. Show analysis history
     IO.puts("\n=== Investment Analysis Process ===")
@@ -548,13 +547,13 @@ defmodule LLMAgent.Examples.InvestmentDemo do
        {flow, state} = LLMAgent.Flows.tool_agent(system_prompt, tools, store_name: store_name)
 
     3. Process client requests:
-       {:ok, response} = LLMAgent.process(flow, Signals.user_message(request), state)
+       {result, new_state} = AgentForge.Flow.process(flow, Signals.user_message(request), state)
 
     4. Handle responses:
-       case response do
-         %{type: :response} -> present_analysis(response.data)
-         %{type: :tool_call} -> execute_investment_tool(response.data)
-         %{type: :error} -> handle_investment_error(response.data)
+       case result do
+         {:emit, response} -> process_emit(response)
+         {:halt, response} -> process_halt(response)
+         {:skip, _} -> process_skip()
        end
 
     5. Get analysis history:
@@ -563,27 +562,13 @@ defmodule LLMAgent.Examples.InvestmentDemo do
   end
 
   # Display different types of responses
-  defp display_response(%{type: :response} = signal) do
-    IO.puts("Advisor: #{signal.data}")
-  end
-
-  defp display_response(%{type: :tool_call} = signal) do
-    tool = signal.data
-    IO.puts("Running analysis: #{tool.name}")
-  end
-
-  defp display_response(%{type: :tool_result} = signal) do
-    data = signal.data
-    IO.puts("Analysis complete: #{format_tool_result(data.name, Jason.encode!(data.result))}")
-  end
-
-  defp display_response(%{type: :error} = signal) do
-    IO.puts("Error: #{signal.data.message}")
-  end
-
-  defp display_response(other) do
-    IO.puts("Unexpected response: #{inspect(other)}")
-  end
+  defp display_response({:emit, %{type: :response} = signal}), do: IO.puts("Advisor: #{signal.data}")
+  defp display_response({:emit, %{type: :tool_call} = signal}), do: IO.puts("Running analysis: #{signal.data.name}")
+  defp display_response({:emit, %{type: :tool_result} = signal}), do: IO.puts("Analysis complete: #{format_tool_result(signal.data.name, Jason.encode!(signal.data.result))}")
+  defp display_response({:emit, %{type: :error} = signal}), do: IO.puts("Error: #{signal.data.message}")
+  defp display_response({:halt, response}), do: IO.puts("Final response: #{inspect(response)}")
+  defp display_response({:skip, _}), do: nil
+  defp display_response(other), do: IO.puts("Unexpected response: #{inspect(other)}")
 
   # Format tool results for display
   defp format_tool_result("etf_screener", result) do

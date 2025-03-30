@@ -12,14 +12,18 @@ defmodule LLMAgent.Handlers do
   alias LLMAgent.{Signals, Store}
 
   # Get store name from state or use default
-  defp get_store_name(state) do
+  defp get_store_name(state) when is_map(state) do
     Map.get(state, :store_name, LLMAgent.Store)
   end
 
+  defp get_store_name(_), do: LLMAgent.Store
+
   @doc """
   Handles user message signals.
+
+  The state must be a map containing :store_name.
   """
-  def message_handler(%{type: :user_message} = signal, state) do
+  def message_handler(%{type: :user_message} = signal, %{store_name: _} = state) do
     Logger.info("Processing user message: #{inspect(signal.data)}")
     store_name = get_store_name(state)
 
@@ -76,8 +80,10 @@ defmodule LLMAgent.Handlers do
 
   @doc """
   Handles thinking step signals.
+
+  The state must be a map containing :store_name.
   """
-  def thinking_handler(%{type: :thinking} = signal, state) do
+  def thinking_handler(%{type: :thinking} = signal, %{store_name: _} = state) do
     Logger.info("Processing thinking step: #{inspect(signal.data)}")
     store_name = get_store_name(state)
 
@@ -135,8 +141,10 @@ defmodule LLMAgent.Handlers do
 
   @doc """
   Handles tool call signals.
+
+  The state must be a map containing :store_name.
   """
-  def tool_handler(%{type: :tool_call} = signal, state) do
+  def tool_handler(%{type: :tool_call} = signal, %{store_name: _} = state) do
     store_name = get_store_name(state)
     tool_name = signal.data.name
     tool_args = signal.data.args
@@ -170,8 +178,10 @@ defmodule LLMAgent.Handlers do
 
   @doc """
   Handles tool result signals.
+
+  The state must be a map containing :store_name.
   """
-  def tool_result_handler(%{type: :tool_result} = signal, state) do
+  def tool_result_handler(%{type: :tool_result} = signal, %{store_name: _} = state) do
     store_name = get_store_name(state)
     Logger.info("Processing tool result: #{inspect(signal.data)}")
 
@@ -183,16 +193,16 @@ defmodule LLMAgent.Handlers do
     tools = Map.get(state, :available_tools, [])
 
     # Add function result to Store
-    Store.add_function_result(store_name, tool_name, tool_result)
+    %{history: updated_history} =
+      Store.add_function_result(%{history: history}, tool_name, tool_result)
 
     try do
       provider = Map.get(state, :provider, :openai)
-      formatted_history = format_history_with_tool_result(history, tool_name, tool_result)
 
       llm_result =
         LLMAgent.Plugin.call_llm(%{
           "provider" => provider,
-          "messages" => formatted_history,
+          "messages" => updated_history,
           "tools" => tools,
           "options" => Map.get(state, :llm_options, %{})
         })
@@ -226,7 +236,7 @@ defmodule LLMAgent.Handlers do
   @doc """
   Handles task state signals.
   """
-  def task_handler(%{type: :task_state} = signal, state) do
+  def task_handler(%{type: :task_state} = signal, %{store_name: _} = state) do
     store_name = get_store_name(state)
     task_id = signal.data.task_id
     task_state = signal.data.state
@@ -241,7 +251,7 @@ defmodule LLMAgent.Handlers do
   @doc """
   Handles response signals.
   """
-  def response_handler(%{type: :response} = signal, state) do
+  def response_handler(%{type: :response} = signal, %{store_name: _} = state) do
     formatter = Map.get(state, :response_formatter)
 
     formatted_response =
@@ -251,15 +261,29 @@ defmodule LLMAgent.Handlers do
         signal.data
       end
 
-    {{:halt, Signals.response(formatted_response)}, state}
+    response = %{
+      type: :response,
+      data: formatted_response,
+      meta: %{
+        timestamp: DateTime.utc_now(),
+        source: nil,
+        trace_id: random_trace_id(),
+        correlation_id: nil,
+        custom: %{}
+      }
+    }
+
+    {{:halt, response}, state}
   end
 
   def response_handler(_signal, state), do: {:skip, state}
 
   @doc """
   Handles error signals.
+
+  The state must be a map containing :store_name.
   """
-  def error_handler(%{type: :error} = signal, state) do
+  def error_handler(%{type: :error} = signal, %{store_name: _} = state) do
     store_name = get_store_name(state)
     message = signal.data.message
     source = signal.data.source
@@ -282,36 +306,30 @@ defmodule LLMAgent.Handlers do
       end
 
     # Add error and response to store
-    Store.add_error(store_name, {error_type, message, DateTime.utc_now()})
+    %{errors: _} = Store.add_error(%{errors: []}, {error_type, message, DateTime.utc_now()})
     Store.add_message(store_name, "assistant", response)
 
-    {{:emit, Signals.response(response)}, state}
+    response_signal = %{
+      type: :response,
+      data: response,
+      meta: %{
+        timestamp: DateTime.utc_now(),
+        source: source,
+        trace_id: random_trace_id(),
+        correlation_id: nil,
+        custom: %{}
+      }
+    }
+
+    {{:emit, response_signal}, state}
   end
 
   def error_handler(_signal, state), do: {:skip, state}
 
-  # Helper functions for LLM processing (unchanged)
+  # Helper functions for LLM processing
   defp format_history_with_thought(history, thought) do
     thought_message = %{"role" => "system", "content" => "Current thinking step: #{thought}"}
     history ++ [thought_message]
-  end
-
-  defp format_history_with_tool_result(history, tool_name, tool_result) do
-    formatted_result = Jason.encode!(tool_result, pretty: true)
-
-    function_result_message = %{
-      "role" => "function",
-      "name" => tool_name,
-      "content" => formatted_result
-    }
-
-    guidance_message = %{
-      "role" => "system",
-      "content" =>
-        "You received a result from the #{tool_name} function. Use this information to continue the conversation."
-    }
-
-    history ++ [function_result_message, guidance_message]
   end
 
   defp has_tool_calls?(llm_result) do
@@ -422,5 +440,9 @@ defmodule LLMAgent.Handlers do
       {:ok, decoded} -> decoded
       _ -> %{}
     end
+  end
+
+  defp random_trace_id do
+    :crypto.strong_rand_bytes(8) |> Base.hex_encode32(case: :lower)
   end
 end

@@ -82,42 +82,52 @@ defmodule LLMAgent.Flows do
   ## Examples
 
       iex> task_def = [
-      ...>   fn data -> Map.put(data, :step1, true) end
+      ...>   fn signal, state -> {:ok, "Step 1", state} end
       ...> ]
       iex> flow = LLMAgent.Flows.task_flow(task_def)
       iex> is_function(flow)
       true
   """
   def task_flow(task_definition, options \\ []) do
-    # Extract options
-    _task_timeout = Keyword.get(options, :task_timeout, 60_000)
-
-    # Create flow
     fn signal, state ->
-      # Use primitive handler to execute task primitives
-      state_with_primitives = Map.put(state, :primitives, task_definition)
+      state_with_primitives = %{
+        state: state,
+        primitives: task_definition,
+        current_index: 0,
+        store_name: Map.get(state, :store_name)
+      }
 
-      # Execute primitives
       try do
-        # Execute each primitive in sequence
-        {result, new_state} =
-          Enum.reduce(task_definition, {signal, state_with_primitives}, fn primitive,
-                                                                           {_signal,
-                                                                            current_state} ->
-            # Execute the primitive with the current signal and state
-            case primitive.(current_state) do
-              {:ok, result, updated_state} ->
-                {result, updated_state}
+        Enum.reduce_while(task_definition, {:ok, state_with_primitives}, fn primitive,
+                                                                            {:ok, current_state} ->
+          case primitive.(signal, current_state.state) do
+            {:ok, result, updated_state} ->
+              new_state = %{
+                current_state
+                | state: updated_state,
+                  current_index: current_state.current_index + 1
+              }
 
-              {:error, reason} ->
-                throw({:error, reason})
-            end
-          end)
+              if current_state.current_index + 1 >= length(task_definition) do
+                {:halt, {:ok, result, new_state}}
+              else
+                {:cont, {:ok, new_state}}
+              end
 
-        {{:emit, result}, Map.drop(new_state, [:primitives])}
-      catch
-        {:error, reason} ->
-          {{:emit, Signals.error(reason, "task_execution")}, state}
+            {:error, reason} ->
+              {:halt, {:error, reason, current_state}}
+          end
+        end)
+        |> case do
+          {:ok, result, final_state} ->
+            {{:emit, result}, final_state.state}
+
+          {:error, reason, _state} ->
+            {{:emit, Signals.error(reason, "task_execution")}, state}
+        end
+      rescue
+        e ->
+          {{:emit, Signals.error(Exception.message(e), "task_execution")}, state}
       end
     end
   end
@@ -147,23 +157,17 @@ defmodule LLMAgent.Flows do
       true
   """
   def batch_processing(items, batch_handler, _options \\ []) do
-    # Create a flow
     fn signal, state ->
-      # Initialize batch state
       batch = Map.get(state, :batch, %{items: items, index: 0})
 
-      # Check if processing is complete
       if batch.index >= length(batch.items) do
         {{:halt, signal}, state}
       else
-        # Get current item
         current_item = Enum.at(batch.items, batch.index)
-
-        # Apply batch handler to current item
         state_with_item = Map.put(state, :current_item, current_item)
+
         {signal_result, new_state} = batch_handler.(signal, state_with_item)
 
-        # Update batch state for next item
         updated_batch = %{batch | index: batch.index + 1}
 
         final_state =
@@ -174,13 +178,55 @@ defmodule LLMAgent.Flows do
         {signal_result, final_state}
       end
     end
-    |> with_middleware(fn signal, state, continue ->
-      {result, new_state} = continue.(signal, state)
-      {result, Map.put(new_state, :batch_processed, true)}
-    end)
-    |> map_flow(fn {result, state} ->
-      {result, Map.put(state, :batch_processing_complete, true)}
-    end)
+  end
+
+  @doc """
+  Creates a flow for a simple question-answering agent.
+
+  This is a specialized flow for handling basic question-answering without tools,
+  providing a streamlined implementation for simple use cases.
+
+  ## Parameters
+
+  - `system_prompt` - The system prompt that defines the agent's behavior
+  - `options` - Additional options for configuring the agent
+
+  ## Returns
+
+  A tuple containing the flow and initial state for the agent.
+
+  ## Examples
+
+      iex> {flow, state} = LLMAgent.Flows.qa_agent("You are a helpful assistant.")
+      iex> is_function(flow) and is_map(state)
+      true
+  """
+  def qa_agent(system_prompt, options \\ []) do
+    conversation(system_prompt, [], options)
+  end
+
+  @doc """
+  Creates a flow for a tool-using agent.
+
+  ## Parameters
+
+  - `system_prompt` - The system prompt that defines the agent's behavior
+  - `tools` - A list of tools that the agent can use
+  - `options` - Additional options for configuring the agent
+
+  ## Returns
+
+  A tuple containing the flow and initial state for the agent.
+
+  ## Examples
+
+      iex> tools = [%{name: "get_time", execute: fn _ -> %{time: DateTime.utc_now()} end}]
+      iex> {flow, state} = LLMAgent.Flows.tool_agent("You are a helpful assistant.", tools)
+      iex> is_function(flow) and is_map(state)
+      true
+  """
+  def tool_agent(system_prompt, tools, options \\ []) do
+    conversation(system_prompt, tools, options)
   end
 
   @doc """
@@ -199,18 +245,15 @@ defmodule LLMAgent.Flows do
 
   ## Examples
 
-      iex> original_flow = fn signal, state -> {{:emit, signal}, state} end
+      iex> flow = fn signal, state -> {{:emit, signal}, state} end
       iex> transform = fn {result, state} -> {result, Map.put(state, :transformed, true)} end
-      iex> new_flow = LLMAgent.Flows.map_flow(original_flow, transform)
+      iex> new_flow = LLMAgent.Flows.map_flow(flow, transform)
       iex> is_function(new_flow)
       true
   """
   def map_flow(flow, transform_fn) do
     fn signal, state ->
-      # Execute the original flow
       {signal_result, new_state} = flow.(signal, state)
-
-      # Apply transformation
       transform_fn.({signal_result, new_state})
     end
   end
@@ -247,66 +290,11 @@ defmodule LLMAgent.Flows do
     end
   end
 
-  @doc """
-  Creates a flow for a simple question-answering agent.
-
-  This is a specialized flow for handling basic question-answering without tools,
-  providing a streamlined implementation for simple use cases.
-
-  ## Parameters
-
-  - `system_prompt` - The system prompt that defines the agent's behavior
-  - `options` - Additional options for configuring the agent
-
-  ## Returns
-
-  A tuple containing the flow and initial state for the agent.
-
-  ## Examples
-
-      iex> {flow, state} = LLMAgent.Flows.qa_agent("You are a helpful assistant.")
-      iex> is_function(flow) and is_map(state)
-      true
-  """
-  def qa_agent(system_prompt, options \\ []) do
-    # Create base conversation flow without any tools
-    conversation(system_prompt, [], options)
-  end
-
-  @doc """
-  Creates a flow for a tool-using agent.
-
-  ## Parameters
-
-  - `system_prompt` - The system prompt that defines the agent's behavior
-  - `tools` - A list of tools that the agent can use
-  - `options` - Additional options for configuring the agent
-
-  ## Returns
-
-  A tuple containing the flow and initial state for the agent.
-
-  ## Examples
-
-      iex> tools = [
-      ...>   %{name: "get_time", description: "Get the current time", execute: fn _ -> %{time: DateTime.utc_now()} end}
-      ...> ]
-      iex> {flow, state} = LLMAgent.Flows.tool_agent("You are a helpful assistant that can use tools.", tools)
-      iex> is_function(flow) and is_map(state)
-      true
-  """
-  def tool_agent(system_prompt, tools, options \\ []) do
-    # Create a more complex agent with tools
-    conversation(system_prompt, tools, options)
-  end
-
   # Private functions
 
   defp register_tools(tools) do
-    # Register each tool with the system
     Enum.each(tools, fn tool ->
       AgentForge.Tools.register(tool.name, fn args ->
-        # Execute the tool function
         try do
           tool.execute.(args)
         rescue
