@@ -182,27 +182,29 @@ defmodule LLMAgent.Examples.SimpleQA do
     ]
 
     # Process each question
-    state = Enum.reduce(questions, state, fn question, current_state ->
-      IO.puts("\nQuestion: #{question}")
+    state =
+      Enum.reduce(questions, state, fn question, current_state ->
+        IO.puts("\nQuestion: #{question}")
 
-      # Process the message through the flow
-      case LLMAgent.process(flow, current_state, question) do
-        {:ok, response, new_state} ->
-          # Display the agent's response
-          IO.puts("Assistant: #{response.data}")
-          # Return updated state for next iteration
-          new_state
+        # Process the message through the flow
+        case LLMAgent.process(flow, current_state, question) do
+          {:ok, response, new_state} ->
+            # Display the agent's response
+            IO.puts("Assistant: #{response.data}")
+            # Return updated state for next iteration
+            new_state
 
-        {:error, error, new_state} ->
-          IO.puts("Error: #{error}")
-          new_state
-      end
-    end)
+          {:error, error, new_state} ->
+            IO.puts("Error: #{error}")
+            new_state
+        end
+      end)
 
     # 6. Display conversation history
     history = Store.get_llm_history(store_name)
 
     IO.puts("\n=== Conversation History ===")
+
     Enum.each(history, fn message ->
       role = Map.get(message, "role") || Map.get(message, :role)
       content = Map.get(message, "content") || Map.get(message, :content)
