@@ -49,18 +49,25 @@ defmodule MockElixirQAProvider do
             |> Enum.reverse()
             |> Enum.find(fn msg ->
               is_binary(msg) or
-              (is_map(msg) and Map.values(msg) |> Enum.any?(fn v -> is_binary(v) and String.contains?(v, "?") end))
+                (is_map(msg) and
+                   Map.values(msg)
+                   |> Enum.any?(fn v -> is_binary(v) and String.contains?(v, "?") end))
             end)
 
           case last_user_message do
-            msg when is_binary(msg) -> %{content: msg}
+            msg when is_binary(msg) ->
+              %{content: msg}
+
             msg when is_map(msg) ->
               content =
                 msg
                 |> Map.values()
                 |> Enum.find(fn v -> is_binary(v) end) || ""
+
               %{content: content}
-            _ -> %{content: ""}
+
+            _ ->
+              %{content: ""}
           end
       end
 
@@ -70,14 +77,21 @@ defmodule MockElixirQAProvider do
 
     Logger.debug("MockElixirQAProvider - Extracted question: #{inspect(question)}")
     Logger.debug("MockElixirQAProvider - question_lower: #{inspect(question_lower)}")
-    Logger.debug("MockElixirQAProvider - contains 'elixir': #{String.contains?(question_lower, "elixir")}")
-    Logger.debug("MockElixirQAProvider - contains 'what is': #{String.contains?(question_lower, "what is")}")
+
+    Logger.debug(
+      "MockElixirQAProvider - contains 'elixir': #{String.contains?(question_lower, "elixir")}"
+    )
+
+    Logger.debug(
+      "MockElixirQAProvider - contains 'what is': #{String.contains?(question_lower, "what is")}"
+    )
 
     # Simulate LLM response format
     response =
       cond do
         String.contains?(question_lower, "elixir") and String.contains?(question_lower, "what is") ->
           Logger.debug("MockElixirQAProvider - Matched condition: 'what is elixir'")
+
           {:ok,
            %{
              "choices" => [
@@ -93,6 +107,7 @@ defmodule MockElixirQAProvider do
 
         String.contains?(question_lower, "process") ->
           Logger.debug("MockElixirQAProvider - Matched condition: 'process'")
+
           {:ok,
            %{
              "choices" => [
@@ -108,6 +123,7 @@ defmodule MockElixirQAProvider do
 
         String.contains?(question_lower, "pattern matching") ->
           Logger.debug("MockElixirQAProvider - Matched condition: 'pattern matching'")
+
           {:ok,
            %{
              "choices" => [
@@ -127,6 +143,7 @@ defmodule MockElixirQAProvider do
 
         true ->
           Logger.debug("MockElixirQAProvider - No condition matched, using default response")
+
           {:ok,
            %{
              "choices" => [
@@ -171,7 +188,8 @@ defmodule LLMAgent.Examples.SimpleQA do
     """
 
     # 4. Create conversation flow
-    {flow, state} = Flows.qa_agent(system_prompt, store_name: store_name, provider: MockElixirQAProvider)
+    {flow, state} =
+      Flows.qa_agent(system_prompt, store_name: store_name, provider: MockElixirQAProvider)
 
     IO.puts("\n=== Simple Question-Answering Agent Example ===\n")
     IO.puts("This example demonstrates:")
