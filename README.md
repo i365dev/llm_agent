@@ -16,7 +16,7 @@ LLMAgent is an abstraction library for building domain-specific intelligent agen
 - 💬 Context and conversation management
 - 🔌 Plugin-based provider integrations
 - 🔄 AgentForge compatibility
-- 🌊 **Dynamic workflow orchestration** - Enable LLMs to create multi-step workflows based on context
+- 🌊 **Dynamic workflow orchestration** - Enable LLMs to create multi-step workflows based on context, refer to [Dynamic Workflow Orchestration in LLMAgent](https://github.com/i365dev/llm_agent/issues/3) for more details.
 
 ## Installation
 
