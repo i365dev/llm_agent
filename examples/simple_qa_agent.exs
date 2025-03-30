@@ -49,18 +49,25 @@ defmodule MockElixirQAProvider do
             |> Enum.reverse()
             |> Enum.find(fn msg ->
               is_binary(msg) or
-                (is_map(msg) and Map.values(msg) |> Enum.any?(fn v -> is_binary(v) and String.contains?(v, "?") end))
+                (is_map(msg) and
+                   Map.values(msg)
+                   |> Enum.any?(fn v -> is_binary(v) and String.contains?(v, "?") end))
             end)
 
           case last_user_message do
-            msg when is_binary(msg) -> %{content: msg}
+            msg when is_binary(msg) ->
+              %{content: msg}
+
             msg when is_map(msg) ->
               content =
                 msg
                 |> Map.values()
                 |> Enum.find(fn v -> is_binary(v) end) || ""
+
               %{content: content}
-            _ -> %{content: ""}
+
+            _ ->
+              %{content: ""}
           end
       end
 
@@ -70,8 +77,14 @@ defmodule MockElixirQAProvider do
 
     Logger.debug("MockElixirQAProvider - Extracted question: #{inspect(question)}")
     Logger.debug("MockElixirQAProvider - question_lower: #{inspect(question_lower)}")
-    Logger.debug("MockElixirQAProvider - contains 'elixir': #{String.contains?(question_lower, "elixir")}")
-    Logger.debug("MockElixirQAProvider - contains 'what is': #{String.contains?(question_lower, "what is")}")
+
+    Logger.debug(
+      "MockElixirQAProvider - contains 'elixir': #{String.contains?(question_lower, "elixir")}"
+    )
+
+    Logger.debug(
+      "MockElixirQAProvider - contains 'what is': #{String.contains?(question_lower, "what is")}"
+    )
 
     # Simulate LLM response format
     response =
