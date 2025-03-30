@@ -33,7 +33,7 @@ graph TD
 
 1. **Signals**: Represent events in the agent lifecycle
 2. **Handlers**: Process signals and update state
-3. **Store**: Manages conversation state and history
+3. **Store**: Manages conversation state and history using GenServer processes, providing a centralized state management system that leverages Elixir's OTP capabilities
 4. **Flows**: Combine handlers into coherent sequences
 5. **Providers**: Interface with LLM backends
 6. **Tools**: External capabilities the agent can use
@@ -76,11 +76,16 @@ classDiagram
     }
     
     class LLMAgent.Store {
-        +new(initial_state)
-        +add_message(state, role, content)
-        +add_thought(state, content)
-        +add_tool_call(state, name, args, result)
-        +prune_thoughts(state, max_thoughts)
+        +start_link(options)
+        +new(initial_state, options)
+        +add_message(store_name, role, content)
+        +add_thought(store_name, content)
+        +add_tool_call(store_name, name, args, result)
+        +get_llm_history(store_name)
+        +get_thoughts(store_name)
+        +get(store_name, key)
+        +put(store_name, key, value)
+        +delete(store_name, key)
     }
     
     class LLMAgent.Flows {

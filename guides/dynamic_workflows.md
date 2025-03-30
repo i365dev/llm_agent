@@ -105,10 +105,17 @@ Below is a simplified implementation of this dynamic workflow:
 
 ```elixir
 defmodule InvestmentDemo do
-  # Process a user message and update state
-  def process_message(state, message) do
+  # Start a new conversation store
+  def start_conversation do
+    store_name = __MODULE__.Store
+    LLMAgent.Store.start_link(name: store_name)
+    store_name
+  end
+
+  # Process a user message using store
+  def process_message(store_name, message) do
     # Simulate LLM analyzing message and deciding which tool to use
-    {tool_name, tool_args, thinking} = simulate_llm_tool_selection(message, state)
+    {tool_name, tool_args, thinking} = simulate_llm_tool_selection(message, store_name)
     
     # Show the simulated thinking process
     IO.puts("Assistant thinking: #{thinking}")
@@ -116,17 +123,17 @@ defmodule InvestmentDemo do
     # Execute the selected tool if applicable
     if tool_name do
       # Execute the tool
-      tool_result = execute_tool(tool_name, tool_args, state)
+      tool_result = execute_tool(tool_name, tool_args, store_name)
       
-      # Update state with tool results
-      updated_state = update_state_with_tool_result(state, tool_name, tool_result)
+      # Update store with tool results
+      update_store_with_tool_result(store_name, tool_name, tool_result)
       
       # Process the result (may trigger another tool or generate response)
-      process_tool_result(updated_state, tool_name, tool_result)
+      process_tool_result(store_name, tool_name, tool_result)
     else
       # No tool selected, generate direct response
-      generate_final_response(state, message)
-      state
+      generate_final_response(store_name, message)
+      :ok
     end
   end
   

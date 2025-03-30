@@ -39,14 +39,20 @@ config :llm_agent, :anthropic,
 Creating a basic question-answering agent requires only a few lines of code:
 
 ```elixir
+# Create a store for our conversation
+store_name = MyApp.ConversationStore
+LLMAgent.Store.start_link(name: store_name)
+
 # Create a simple Q&A agent with a system prompt
 {flow, state} = LLMAgent.Flows.conversation(
-  "You are a helpful assistant that answers questions concisely."
+  "You are a helpful assistant that answers questions concisely.",
+  [],
+  store_name: store_name
 )
 
 # Process a user message
 message = "What is Elixir?"
-{:ok, result, new_state} = AgentForge.process(flow, state, LLMAgent.Signals.user_message(message))
+{:ok, result, new_state} = LLMAgent.process(flow, state, message)
 
 # Extract the assistant response
 response = result.data
@@ -78,15 +84,20 @@ tools = [
   }
 ]
 
+# Create a store for our conversation
+store_name = MyApp.ToolsConversationStore
+LLMAgent.Store.start_link(name: store_name)
+
 # Create an agent with tools
 {flow, state} = LLMAgent.Flows.conversation(
   "You are a helpful assistant that can perform calculations and tell the time.",
-  tools
+  tools,
+  store_name: store_name
 )
 
 # Process a message that might require a tool
 message = "What's 22 + 20?"
-{:ok, result, new_state} = AgentForge.process(flow, state, LLMAgent.Signals.user_message(message))
+{:ok, result, new_state} = LLMAgent.process(flow, state, message)
 ```
 
 ## Next Steps

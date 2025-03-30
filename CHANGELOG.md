@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-03-30
+
+### Changed
+- **BREAKING**: Refactored LLMAgent.Store to leverage AgentForge.Store's GenServer implementation
+- Store interface now returns :ok instead of updated state maps
+- Store now uses process names (atoms) instead of directly returning state maps
+- Removed unused sequence_flows function and its helper functions from flows.ex
+
+### Fixed
+- Fixed warnings in the investment_portfolio.exs example
+- Fixed unused function parameters
+- Updated example code to use the correct Store interface
+
+### Documentation
+- Updated documentation to reflect Store interface changes
+- Enhanced dynamic workflow documentation to better showcase complex scenarios
+
 ## [0.1.1] - 2025-03-29
 
 ### Added

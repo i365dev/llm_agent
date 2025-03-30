@@ -450,29 +450,29 @@ defmodule LLMAgent.Flows do
 
   # Create a flow that combines flows together in sequence
   # This function is currently unused but kept for future use
-  defp sequence_flows(flows) do
-    fn signal, state ->
-      Enum.reduce_while(flows, {signal, state}, &process_flow_result/2)
-    end
-  end
+  # defp sequence_flows(flows) do
+  #   fn signal, state ->
+  #     Enum.reduce_while(flows, {signal, state}, &process_flow_result/2)
+  #   end
+  # end
 
-  # Helper function to process flow results and determine continuation
-  defp process_flow_result(flow, {current_signal, current_state}) do
-    case flow.(current_signal, current_state) do
-      {:emit, new_signal, new_state} ->
-        {:cont, {new_signal, new_state}}
+  # # Helper function to process flow results and determine continuation
+  # defp process_flow_result(flow, {current_signal, current_state}) do
+  #   case flow.(current_signal, current_state) do
+  #     {:emit, new_signal, new_state} ->
+  #       {:cont, {new_signal, new_state}}
 
-      {:skip, new_state} ->
-        {:cont, {current_signal, new_state}}
+  #     {:skip, new_state} ->
+  #       {:cont, {current_signal, new_state}}
 
-      {:halt, result, new_state} ->
-        {:halt, {:halt, result, new_state}}
+  #     {:halt, result, new_state} ->
+  #       {:halt, {:halt, result, new_state}}
 
-      {:error, reason, new_state} ->
-        {:halt, {:error, reason, new_state}}
+  #     {:error, reason, new_state} ->
+  #       {:halt, {:error, reason, new_state}}
 
-      other ->
-        {:halt, other}
-    end
-  end
+  #     other ->
+  #       {:halt, other}
+  #   end
+  # end
 end

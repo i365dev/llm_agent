@@ -25,7 +25,7 @@ Add `llm_agent` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:llm_agent, "~> 0.1.1"},
+    {:llm_agent, "~> 0.2.0"},
     # Optional LLM provider dependencies
     {:openai, "~> 0.5.0"}, # If using OpenAI
     {:anthropic, "~> 0.1.0"} # If using Anthropic
