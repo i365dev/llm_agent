@@ -119,6 +119,63 @@ defmodule LLMAgent.Store do
   end
 
   @doc """
+  Gets a value from the store by key.
+
+  ## Parameters
+  - `store_name` - The name of the store
+  - `key` - The key to retrieve
+
+  ## Returns
+  {:ok, value} if the key exists, {:error, :not_found} otherwise
+
+  ## Examples
+      iex> LLMAgent.Store.put(store, :test_key, "test_value")
+      :ok
+      iex> LLMAgent.Store.get(store, :test_key)
+      {:ok, "test_value"}
+  """
+  def get(store_name, key) do
+    AgentForge.Store.get(store_name, key)
+  end
+
+  @doc """
+  Puts a value into the store with the given key.
+
+  ## Parameters
+  - `store_name` - The name of the store
+  - `key` - The key to set
+  - `value` - The value to store
+
+  ## Returns
+  :ok
+
+  ## Examples
+      iex> LLMAgent.Store.put(store, :test_key, "test_value")
+      :ok
+  """
+  def put(store_name, key, value) do
+    AgentForge.Store.put(store_name, key, value)
+  end
+
+  @doc """
+  Deletes a key from the store.
+
+  ## Parameters
+  - `store_name` - The name of the store
+  - `key` - The key to delete
+
+  ## Returns
+  :ok
+
+  ## Examples
+      iex> LLMAgent.Store.delete(store, :test_key)
+      :ok
+  """
+  def delete(store_name, key) do
+    AgentForge.Store.delete(store_name, key)
+  end
+
+  @doc """
   Adds a message to history.
 
   ## Parameters

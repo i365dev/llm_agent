@@ -160,6 +160,41 @@ defmodule LLMAgent.StoreTest do
     end
   end
 
+  describe "basic store operations" do
+    test "puts and gets values correctly", %{store: store} do
+      # Test putting a value
+      assert :ok = Store.put(store, :test_key, "test_value")
+
+      # Test getting the value
+      assert {:ok, "test_value"} = Store.get(store, :test_key)
+
+      # Test overwriting a value
+      assert :ok = Store.put(store, :test_key, "new_value")
+      assert {:ok, "new_value"} = Store.get(store, :test_key)
+    end
+
+    test "returns error for non-existing keys", %{store: store} do
+      assert {:error, :not_found} = Store.get(store, :non_existing_key)
+    end
+
+    test "deletes keys correctly", %{store: store} do
+      # Put a value first
+      assert :ok = Store.put(store, :to_delete, "delete_me")
+      assert {:ok, "delete_me"} = Store.get(store, :to_delete)
+
+      # Delete the key
+      assert :ok = Store.delete(store, :to_delete)
+
+      # Verify it's gone
+      assert {:error, :not_found} = Store.get(store, :to_delete)
+    end
+
+    test "handles deleting non-existing keys", %{store: store} do
+      # Should not error when deleting non-existing key
+      assert :ok = Store.delete(store, :never_existed)
+    end
+  end
+
   describe "history optimization" do
     test "trims history while preserving system messages", %{store: store} do
       # Add system message

@@ -28,7 +28,6 @@ defmodule MockInvestmentProvider do
   the evolving context and state.
   """
 
-  @behaviour LLMAgent.Provider
   require Logger
 
   @doc """
@@ -432,7 +431,7 @@ defmodule MockInvestmentProvider do
       contains_keywords?(question, ["downturn", "simulation", "crisis", "boom"])
   end
 
-  defp determine_risk_profile(question, portfolio \\ nil) do
+  defp determine_risk_profile(question, portfolio) do
     # If we already have a portfolio, use its risk profile as default
     default_profile = if portfolio, do: portfolio["risk_profile"], else: "Moderate"
 
@@ -984,8 +983,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
   complex tool chaining, state management, and error recovery.
   """
 
-  alias AgentForge.{Flow, Store}
-  alias LLMAgent.{Flows, Signals}
+  alias LLMAgent.{Flows, Signals, Store}
 
   require Logger
 
@@ -995,7 +993,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
     # 2. Create store for this example with unique name
     store_name = :"investment_advisor_store_#{System.unique_integer([:positive])}"
-    {:ok, _store_pid} = LLMAgent.Store.start_link(name: store_name)
+    {:ok, _store_pid} = Store.start_link(name: store_name)
 
     # 3. Store initial state using the Store interface
     Store.put(store_name, :market_volatility, "Normal")
@@ -1146,7 +1144,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
     4. State Management:
        The Store component maintains state across interactions:
-       - #{length(elem(Store.get_all(store_name), 1))} state keys tracked
+       - State keys tracked for decision making
        - Analysis history preserved
        - Tool results maintained for context
     """)
@@ -1179,13 +1177,13 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
     3. Process client requests:
     ```elixir
-    {result, new_state} = AgentForge.Flow.process(flow, Signals.user_message(request), state)
+    {result, new_state} = flow.(Signals.user_message(request), state)
     ```
 
     4. Access stateful information:
     ```elixir
-    portfolio = AgentForge.Store.get(store_name, :current_portfolio)
-    history = LLMAgent.Store.get_llm_history(store_name)
+    portfolio = Store.get(store_name, :current_portfolio)
+    history = Store.get_llm_history(store_name)
     """)
   end
 
@@ -1249,20 +1247,23 @@ defmodule LLMAgent.Examples.InvestmentDemo do
   defp display_response({:emit, %{type: :response} = signal}),
     do: IO.puts("Advisor: #{signal.data}")
 
-  defp display_response({:emit, %{type: :tool_call} = signal}),
-    do: IO.puts("Running analysis: #{signal.data.name}")
-
   defp display_response({:emit, %{type: :tool_result} = signal}),
     do:
       IO.puts(
         "Analysis complete: #{format_tool_result(signal.data.name, Jason.encode!(signal.data.result))}"
       )
 
-  defp display_response({:emit, %{type: :error} = signal}),
+  defp _display_tool_call({:emit, %{type: :tool_call} = signal}),
+    do: IO.puts("Running analysis: #{signal.data.name}")
+
+  defp _display_error({:emit, %{type: :error} = signal}),
     do: IO.puts("Error: #{signal.data.message}")
 
-  defp display_response({:halt, response}), do: IO.puts("Final response: #{inspect(response)}")
-  defp display_response({:skip, _}), do: nil
+  defp _display_halt({:halt, response}),
+    do: IO.puts("Final response: #{inspect(response)}")
+
+  defp _display_skip({:skip, _}), do: nil
+
   defp display_response(other), do: IO.puts("Unexpected response: #{inspect(other)}")
 
   # Format tool results for display
