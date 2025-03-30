@@ -10,7 +10,7 @@
 # 3. Structured data handling
 # 4. Error recovery in financial operations
 #
-# Run with: elixir investment_portfolio.exs
+# Run with: mix run examples/investment_portfolio.exs
 
 defmodule MockInvestmentProvider do
   @behaviour LLMAgent.Provider

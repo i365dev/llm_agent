@@ -10,7 +10,7 @@
 # 3. Processing tool calls and results
 # 4. Error handling for tool execution
 #
-# Run with: elixir tool_using_agent.exs
+# Run with: mix run examples/tool_using_agent.exs
 
 # First, let's define a mock LLM provider that can handle tool usage
 defmodule MockToolUsingProvider do

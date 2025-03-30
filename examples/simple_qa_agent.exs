@@ -9,7 +9,7 @@
 # 3. Handling conversations and responses
 # 4. Error handling and state management
 #
-# Run with: elixir simple_qa_agent.exs
+# Run with: mix run examples/simple_qa_agent.exs
 
 # First, let's define a mock LLM provider for testing
 defmodule MockElixirQAProvider do
