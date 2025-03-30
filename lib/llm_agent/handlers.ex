@@ -421,50 +421,53 @@ defmodule LLMAgent.Handlers do
 
   defp extract_content(llm_result) do
     # First handle responses wrapped in tuples, which is the format returned by MockElixirQAProvider
-    result =
-      case llm_result do
-        {:ok, data} ->
-          Logger.debug("Extract_content - Unwrapping {:ok, data} format")
-          data
+    result = unwrap_result(llm_result)
 
-        other ->
-          other
-      end
+    # Then extract content from different possible formats
+    extract_from_format(result)
+  end
 
-    # Then extract content from different possible locations
-    case result do
-      %{"content" => content} when is_binary(content) ->
-        content
+  # Unwraps result from potential tuple format
+  defp unwrap_result({:ok, data}) do
+    Logger.debug("Extract_content - Unwrapping {:ok, data} format")
+    data
+  end
 
-      %{"message" => %{"content" => content}} when is_binary(content) ->
-        content
+  defp unwrap_result(other), do: other
 
-      %{"choices" => [%{"message" => %{"content" => content}} | _]} when is_binary(content) ->
-        content
+  # Extract content from various response formats
+  defp extract_from_format(%{"content" => content}) when is_binary(content), do: content
 
-      %{"choices" => [%{"text" => content} | _]} when is_binary(content) ->
-        content
+  defp extract_from_format(%{"message" => %{"content" => content}}) when is_binary(content),
+    do: content
 
-      # Handle deeply nested data structure
-      %{"choices" => [first | _]} ->
-        content = get_in(first, ["message", "content"])
-        if is_binary(content), do: content, else: ""
+  defp extract_from_format(%{"choices" => [%{"message" => %{"content" => content}} | _]})
+       when is_binary(content),
+       do: content
 
-      # Handle format containing type and content
-      %{"type" => "response", "content" => content} when is_binary(content) ->
-        content
+  defp extract_from_format(%{"choices" => [%{"text" => content} | _]}) when is_binary(content),
+    do: content
 
-      %{"type" => "thinking", "content" => thought} when is_binary(thought) ->
-        thought
+  # Handle deeply nested data structure
+  defp extract_from_format(%{"choices" => [first | _]}) do
+    content = get_in(first, ["message", "content"])
+    if is_binary(content), do: content, else: ""
+  end
 
-      # Fallback to empty string
-      _ ->
-        Logger.warning(
-          "Extract_content - Could not extract content from response: #{inspect(result)}"
-        )
+  # Handle format containing type and content
+  defp extract_from_format(%{"type" => "response", "content" => content}) when is_binary(content),
+    do: content
 
-        ""
-    end
+  defp extract_from_format(%{"type" => "thinking", "content" => thought}) when is_binary(thought),
+    do: thought
+
+  # Fallback to empty string
+  defp extract_from_format(result) do
+    Logger.warning(
+      "Extract_content - Could not extract content from response: #{inspect(result)}"
+    )
+
+    ""
   end
 
   defp extract_tool_calls(llm_result) do

@@ -57,136 +57,157 @@ defmodule LLMAgent.Flows do
       require Logger
       Logger.debug("Conversation flow - Processing signal: #{inspect(signal.type)}")
 
-      # Determine appropriate handler based on signal type
-      result =
-        case signal.type do
-          :user_message ->
-            # User message flow path
-            Logger.debug("Conversation flow - Processing user message")
-
-            case Handlers.message_handler(signal, state) do
-              {{:emit, response_signal}, new_state} ->
-                {:emit, response_signal, new_state}
-
-              {:skip, new_state} ->
-                {:skip, new_state}
-
-              other ->
-                Logger.warning("Unexpected message handler result: #{inspect(other)}")
-                {:skip, state}
-            end
-
-          :thinking ->
-            # Thinking flow path
-            Logger.debug("Conversation flow - Processing thinking signal")
-
-            case Handlers.thinking_handler(signal, state) do
-              {{:emit, new_signal}, new_state} ->
-                {:emit, new_signal, new_state}
-
-              {:skip, new_state} ->
-                {:skip, new_state}
-
-              other ->
-                Logger.warning("Unexpected thinking handler result: #{inspect(other)}")
-                {:skip, state}
-            end
-
-          :tool_call ->
-            # Tool call flow path
-            Logger.debug("Conversation flow - Processing tool call signal")
-
-            case Handlers.tool_handler(signal, state) do
-              {{:emit, new_signal}, new_state} ->
-                {:emit, new_signal, new_state}
-
-              {:skip, new_state} ->
-                {:skip, new_state}
-
-              other ->
-                Logger.warning("Unexpected tool handler result: #{inspect(other)}")
-                {:skip, state}
-            end
-
-          :tool_result ->
-            # Tool result flow path
-            Logger.debug("Conversation flow - Processing tool result signal")
-
-            case Handlers.tool_result_handler(signal, state) do
-              {{:emit, new_signal}, new_state} ->
-                {:emit, new_signal, new_state}
-
-              {:skip, new_state} ->
-                {:skip, new_state}
-
-              other ->
-                Logger.warning("Unexpected tool result handler result: #{inspect(other)}")
-                {:skip, state}
-            end
-
-          :task ->
-            # Task flow path
-            Logger.debug("Conversation flow - Processing task signal")
-
-            case Handlers.task_handler(signal, state) do
-              {{:emit, new_signal}, new_state} ->
-                {:emit, new_signal, new_state}
-
-              {:skip, new_state} ->
-                {:skip, new_state}
-
-              other ->
-                Logger.warning("Unexpected task handler result: #{inspect(other)}")
-                {:skip, state}
-            end
-
-          :response ->
-            # Response flow path
-            Logger.debug("Conversation flow - Processing response signal")
-
-            case Handlers.response_handler(signal, state) do
-              {{:emit, new_signal}, new_state} ->
-                {:emit, new_signal, new_state}
-
-              {:skip, new_state} ->
-                {:skip, new_state}
-
-              other ->
-                Logger.warning("Unexpected response handler result: #{inspect(other)}")
-                {:skip, state}
-            end
-
-          :error ->
-            # Error flow path
-            Logger.debug("Conversation flow - Processing error signal")
-
-            case Handlers.error_handler(signal, state) do
-              {{:emit, new_signal}, new_state} ->
-                {:emit, new_signal, new_state}
-
-              {:skip, new_state} ->
-                {:skip, new_state}
-
-              other ->
-                Logger.warning("Unexpected error handler result: #{inspect(other)}")
-                {:skip, state}
-            end
-
-          _ ->
-            # Fallback for unknown signal types
-            Logger.warning("Conversation flow - Unknown signal type: #{inspect(signal.type)}")
-
-            fallback_signal =
-              Signals.response("Received unhandled signal type: #{inspect(signal.type)}")
-
-            {:emit, fallback_signal, state}
-        end
+      # Handle the signal with the appropriate handler based on type
+      result = handle_signal(signal, state)
 
       Logger.debug("Conversation flow - Result: #{inspect(result)}")
       result
     end
 
     {flow, initial_state}
+  end
+
+  # Helper functions for signal handling in conversation flow
+
+  # Dispatches to the appropriate handler based on signal type
+  defp handle_signal(signal, state) do
+    require Logger
+
+    case signal.type do
+      :user_message -> handle_user_message(signal, state)
+      :thinking -> handle_thinking(signal, state)
+      :tool_call -> handle_tool_call(signal, state)
+      :tool_result -> handle_tool_result(signal, state)
+      :task -> handle_task(signal, state)
+      :response -> handle_response(signal, state)
+      :error -> handle_error(signal, state)
+      _ -> handle_unknown_signal_type(signal, state)
+    end
+  end
+
+  defp handle_user_message(signal, state) do
+    require Logger
+    Logger.debug("Conversation flow - Processing user message")
+
+    case Handlers.message_handler(signal, state) do
+      {{:emit, response_signal}, new_state} ->
+        {:emit, response_signal, new_state}
+
+      {:skip, new_state} ->
+        {:skip, new_state}
+
+      other ->
+        Logger.warning("Unexpected message handler result: #{inspect(other)}")
+        {:skip, state}
+    end
+  end
+
+  defp handle_thinking(signal, state) do
+    require Logger
+    Logger.debug("Conversation flow - Processing thinking signal")
+
+    case Handlers.thinking_handler(signal, state) do
+      {{:emit, new_signal}, new_state} ->
+        {:emit, new_signal, new_state}
+
+      {:skip, new_state} ->
+        {:skip, new_state}
+
+      other ->
+        Logger.warning("Unexpected thinking handler result: #{inspect(other)}")
+        {:skip, state}
+    end
+  end
+
+  defp handle_tool_call(signal, state) do
+    require Logger
+    Logger.debug("Conversation flow - Processing tool call signal")
+
+    case Handlers.tool_handler(signal, state) do
+      {{:emit, new_signal}, new_state} ->
+        {:emit, new_signal, new_state}
+
+      {:skip, new_state} ->
+        {:skip, new_state}
+
+      other ->
+        Logger.warning("Unexpected tool handler result: #{inspect(other)}")
+        {:skip, state}
+    end
+  end
+
+  defp handle_tool_result(signal, state) do
+    require Logger
+    Logger.debug("Conversation flow - Processing tool result signal")
+
+    case Handlers.tool_result_handler(signal, state) do
+      {{:emit, new_signal}, new_state} ->
+        {:emit, new_signal, new_state}
+
+      {:skip, new_state} ->
+        {:skip, new_state}
+
+      other ->
+        Logger.warning("Unexpected tool result handler result: #{inspect(other)}")
+        {:skip, state}
+    end
+  end
+
+  defp handle_task(signal, state) do
+    require Logger
+    Logger.debug("Conversation flow - Processing task signal")
+
+    case Handlers.task_handler(signal, state) do
+      {:skip, new_state} ->
+        {:skip, new_state}
+
+      other ->
+        Logger.warning("Unexpected task handler result: #{inspect(other)}")
+        {:skip, state}
+    end
+  end
+
+  defp handle_response(signal, state) do
+    require Logger
+    Logger.debug("Conversation flow - Processing response signal")
+
+    case Handlers.response_handler(signal, state) do
+      {:skip, new_state} ->
+        {:skip, new_state}
+
+      {{:halt, result}, new_state} ->
+        {:halt, result, new_state}
+
+      other ->
+        Logger.warning("Unexpected response handler result: #{inspect(other)}")
+        {:skip, state}
+    end
+  end
+
+  defp handle_error(signal, state) do
+    require Logger
+    Logger.debug("Conversation flow - Processing error signal")
+
+    case Handlers.error_handler(signal, state) do
+      {{:emit, new_signal}, new_state} ->
+        {:emit, new_signal, new_state}
+
+      {:skip, new_state} ->
+        {:skip, new_state}
+
+      other ->
+        Logger.warning("Unexpected error handler result: #{inspect(other)}")
+        {:skip, state}
+    end
+  end
+
+  defp handle_unknown_signal_type(signal, state) do
+    require Logger
+    Logger.warning("Conversation flow - Unknown signal type: #{inspect(signal.type)}")
+
+    fallback_signal = Signals.response("Received unhandled signal type: #{inspect(signal.type)}")
+
+    {:emit, fallback_signal, state}
   end
 
   @doc """
@@ -428,26 +449,30 @@ defmodule LLMAgent.Flows do
   end
 
   # Create a flow that combines flows together in sequence
+  # This function is currently unused but kept for future use
   defp sequence_flows(flows) do
     fn signal, state ->
-      Enum.reduce_while(flows, {signal, state}, fn flow, {current_signal, current_state} ->
-        case flow.(current_signal, current_state) do
-          {:emit, new_signal, new_state} ->
-            {:cont, {new_signal, new_state}}
+      Enum.reduce_while(flows, {signal, state}, &process_flow_result/2)
+    end
+  end
 
-          {:skip, new_state} ->
-            {:cont, {current_signal, new_state}}
+  # Helper function to process flow results and determine continuation
+  defp process_flow_result(flow, {current_signal, current_state}) do
+    case flow.(current_signal, current_state) do
+      {:emit, new_signal, new_state} ->
+        {:cont, {new_signal, new_state}}
 
-          {:halt, result, new_state} ->
-            {:halt, {:halt, result, new_state}}
+      {:skip, new_state} ->
+        {:cont, {current_signal, new_state}}
 
-          {:error, reason, new_state} ->
-            {:halt, {:error, reason, new_state}}
+      {:halt, result, new_state} ->
+        {:halt, {:halt, result, new_state}}
 
-          other ->
-            {:halt, other}
-        end
-      end)
+      {:error, reason, new_state} ->
+        {:halt, {:error, reason, new_state}}
+
+      other ->
+        {:halt, other}
     end
   end
 end
