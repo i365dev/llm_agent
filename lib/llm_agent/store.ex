@@ -28,6 +28,7 @@ defmodule LLMAgent.Store do
   """
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, @default_store_name)
+    store_opts = Keyword.put(opts, :name, name)
 
     initial_state = %{
       history: [],
@@ -37,28 +38,19 @@ defmodule LLMAgent.Store do
       preferences: %{}
     }
 
-    # Pass any additional options to AgentForge.Store
-    store_opts = Keyword.put(opts, :name, name)
-
-    # Start the AgentForge.Store with our initial state
-    result = AgentForge.Store.start_link(store_opts)
-
-    # Initialize our default values
-    case result do
-      {:ok, _pid} ->
-        Enum.each(initial_state, fn {key, value} ->
-          # Only set if not already present
-          case AgentForge.Store.get(name, key) do
-            {:error, :not_found} -> AgentForge.Store.put(name, key, value)
-            _ -> :ok
-          end
-        end)
-
-      _ ->
-        :ok
+    with {:ok, pid} <- AgentForge.Store.start_link(store_opts) do
+      initialize_store(name, initial_state)
+      {:ok, pid}
     end
+  end
 
-    result
+  defp initialize_store(name, initial_state) do
+    Enum.each(initial_state, fn {key, value} ->
+      case AgentForge.Store.get(name, key) do
+        {:error, :not_found} -> AgentForge.Store.put(name, key, value)
+        _ -> :ok
+      end
+    end)
   end
 
   @doc """
@@ -82,21 +74,29 @@ defmodule LLMAgent.Store do
       iex> {:ok, history} = AgentForge.Store.get(store, :history)
       iex> is_list(history)
       true
-      
+
       iex> store = LLMAgent.Store.new(%{user_id: "123"})
       iex> {:ok, "123"} = AgentForge.Store.get(store, :user_id)
   """
   def new(attrs \\ %{}, opts \\ []) do
     name = Keyword.get(opts, :name, @default_store_name)
 
-    # Ensure store exists
+    ensure_store_exists(name, opts)
+    initialize_default_values(name)
+    merge_attributes(name, attrs)
+
+    name
+  end
+
+  defp ensure_store_exists(name, opts) do
     case Process.whereis(name) do
       nil -> start_link(Keyword.put(opts, :name, name))
       _ -> :ok
     end
+  end
 
-    # Initialize with default values and merge with attrs
-    default_state = %{
+  defp initialize_default_values(name) do
+    defaults = %{
       history: [],
       thoughts: [],
       tool_calls: [],
@@ -104,20 +104,18 @@ defmodule LLMAgent.Store do
       preferences: %{}
     }
 
-    # Set default values if not already present
-    Enum.each(default_state, fn {key, value} ->
+    Enum.each(defaults, fn {key, value} ->
       case AgentForge.Store.get(name, key) do
         {:error, :not_found} -> AgentForge.Store.put(name, key, value)
         _ -> :ok
       end
     end)
+  end
 
-    # Merge with attrs
+  defp merge_attributes(name, attrs) do
     Enum.each(attrs, fn {key, value} ->
       AgentForge.Store.put(name, key, value)
     end)
-
-    name
   end
 
   @doc """
@@ -452,7 +450,7 @@ defmodule LLMAgent.Store do
   Trims history to a maximum number of entries while preserving system messages.
 
   This function is useful for managing memory usage in long conversations.
-  System messages are always preserved, and the most recent user/assistant 
+  System messages are always preserved, and the most recent user/assistant
   messages are kept up to the specified limit.
 
   ## Parameters
@@ -469,7 +467,7 @@ defmodule LLMAgent.Store do
       iex> state = LLMAgent.Store.new()
       iex> state = LLMAgent.Store.add_message(state, "system", "You are an assistant")
       iex> # Add many user/assistant message pairs to exceed the limit
-      iex> state = Enum.reduce(1..60, state, fn n, acc -> 
+      iex> state = Enum.reduce(1..60, state, fn n, acc ->
       ...>   acc = LLMAgent.Store.add_message(acc, "user", "Message " <> Integer.to_string(n))
       ...>   LLMAgent.Store.add_message(acc, "assistant", "Response " <> Integer.to_string(n))
       ...> end)

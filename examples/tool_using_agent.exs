@@ -31,59 +31,64 @@ defmodule MockToolUsingProvider do
       String.contains?(String.downcase(question), ["calculate", "*", "+", "-", "/"]) ->
         # Simulate LLM deciding to use calculator
         expression = extract_math_expression(question)
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => "Let me calculate that for you.",
-                "tool_calls" => [
-                  %{
-                    "function" => %{
-                      "name" => "calculator",
-                      "arguments" => Jason.encode!(%{"expression" => expression})
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }}
+
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" => "Let me calculate that for you.",
+                 "tool_calls" => [
+                   %{
+                     "function" => %{
+                       "name" => "calculator",
+                       "arguments" => Jason.encode!(%{"expression" => expression})
+                     }
+                   }
+                 ]
+               }
+             }
+           ]
+         }}
 
       String.contains?(String.downcase(question), ["time", "date"]) ->
         # Simulate LLM deciding to use time tool
         format = if String.contains?(question, "ISO"), do: "iso8601", else: "utc"
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => "I'll check the current time.",
-                "tool_calls" => [
-                  %{
-                    "function" => %{
-                      "name" => "current_time",
-                      "arguments" => Jason.encode!(%{"format" => format})
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }}
+
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" => "I'll check the current time.",
+                 "tool_calls" => [
+                   %{
+                     "function" => %{
+                       "name" => "current_time",
+                       "arguments" => Jason.encode!(%{"format" => format})
+                     }
+                   }
+                 ]
+               }
+             }
+           ]
+         }}
 
       String.contains?(question, "error") ->
         {:error, "Simulated LLM error"}
 
       true ->
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => "I don't need any tools to answer this: #{question}",
-                "role" => "assistant"
-              }
-            }
-          ]
-        }}
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" => "I don't need any tools to answer this: #{question}",
+                 "role" => "assistant"
+               }
+             }
+           ]
+         }}
     end
   end
 
@@ -94,11 +99,14 @@ defmodule MockToolUsingProvider do
         Regex.run(~r/(\d+)\s*\*\s*(\d+)/, question)
         |> Enum.drop(1)
         |> Enum.join(" * ")
+
       String.contains?(question, "+") ->
         Regex.run(~r/(\d+)\s*\+\s*(\d+)/, question)
         |> Enum.drop(1)
         |> Enum.join(" + ")
-      true -> "0"
+
+      true ->
+        "0"
     end
   end
 end
@@ -131,6 +139,7 @@ defmodule LLMAgent.Examples.ToolDemo do
         },
         execute: fn args ->
           expr = args["expression"]
+
           try do
             {result, _} = Code.eval_string(expr)
             %{result: result}
@@ -153,6 +162,7 @@ defmodule LLMAgent.Examples.ToolDemo do
         },
         execute: fn args ->
           now = DateTime.utc_now()
+
           case args["format"] do
             "iso8601" -> %{time: DateTime.to_iso8601(now)}
             "unix" -> %{time: DateTime.to_unix(now)}
@@ -168,7 +178,7 @@ defmodule LLMAgent.Examples.ToolDemo do
     Application.put_env(:llm_agent, :provider, MockToolUsingProvider)
 
     # 2. Create store for this example
-    store_name = :"tool_using_store"
+    store_name = :tool_using_store
     _store = Store.start_link(name: store_name)
 
     # 3. Create system prompt for tool-using agent
@@ -195,8 +205,10 @@ defmodule LLMAgent.Examples.ToolDemo do
       "Calculate 42 * 73",
       "What time is it in ISO format?",
       "What's 5 + 7?",
-      "trigger an error",  # Will demonstrate error handling
-      "Tell me a joke"     # Won't use any tools
+      # Will demonstrate error handling
+      "trigger an error",
+      # Won't use any tools
+      "Tell me a joke"
     ]
 
     # Process each question
@@ -221,22 +233,28 @@ defmodule LLMAgent.Examples.ToolDemo do
     # Show conversation and tool interaction history
     IO.puts("\n=== Interaction History ===")
     history = Store.get_llm_history(store_name)
+
     Enum.each(history, fn message ->
       case message do
         %{role: "system"} ->
           IO.puts("System: #{message.content}")
+
         %{role: "user"} ->
           IO.puts("\nHuman: #{message.content}")
+
         %{role: "assistant"} ->
           IO.puts("Assistant: #{message.content}")
+
         %{role: "function", name: name} ->
           IO.puts("Tool (#{name}): #{message.content}")
+
         _ ->
           IO.puts("#{String.capitalize(message.role)}: #{message.content}")
       end
     end)
 
     IO.puts("\n=== Example Complete ===")
+
     IO.puts("""
 
     To use this in your own application:

@@ -6,8 +6,8 @@ defmodule LLMAgent.StoreTest do
 
   use ExUnit.Case, async: true
 
-  alias LLMAgent.Store
   alias AgentForge.Store, as: AFStore
+  alias LLMAgent.Store
 
   setup do
     store_name = String.to_atom("store_test_#{System.unique_integer([:positive])}")

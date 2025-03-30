@@ -36,128 +36,148 @@ defmodule MockInvestmentProvider do
     cond do
       # Initial portfolio creation flow
       not Map.has_key?(function_results, "etf_screener") and should_create_portfolio?(question) ->
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => "Let me analyze available ETFs for your portfolio.",
-                "tool_calls" => [
-                  %{
-                    "function" => %{
-                      "name" => "etf_screener",
-                      "arguments" => Jason.encode!(%{})
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }}
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" => "Let me analyze available ETFs for your portfolio.",
+                 "tool_calls" => [
+                   %{
+                     "function" => %{
+                       "name" => "etf_screener",
+                       "arguments" => Jason.encode!(%{})
+                     }
+                   }
+                 ]
+               }
+             }
+           ]
+         }}
 
       # Portfolio construction after ETF screening
-      Map.has_key?(function_results, "etf_screener") and not Map.has_key?(function_results, "portfolio_constructor") ->
+      Map.has_key?(function_results, "etf_screener") and
+          not Map.has_key?(function_results, "portfolio_constructor") ->
         risk_profile = determine_risk_profile(question)
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => "I've found suitable ETFs. Now let me construct a #{risk_profile} portfolio.",
-                "tool_calls" => [
-                  %{
-                    "function" => %{
-                      "name" => "portfolio_constructor",
-                      "arguments" => Jason.encode!(%{
-                        "risk_profile" => risk_profile,
-                        "etfs" => extract_etfs(function_results["etf_screener"])
-                      })
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }}
+
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" =>
+                   "I've found suitable ETFs. Now let me construct a #{risk_profile} portfolio.",
+                 "tool_calls" => [
+                   %{
+                     "function" => %{
+                       "name" => "portfolio_constructor",
+                       "arguments" =>
+                         Jason.encode!(%{
+                           "risk_profile" => risk_profile,
+                           "etfs" => extract_etfs(function_results["etf_screener"])
+                         })
+                     }
+                   }
+                 ]
+               }
+             }
+           ]
+         }}
 
       # Backtest after portfolio construction
-      Map.has_key?(function_results, "portfolio_constructor") and not Map.has_key?(function_results, "portfolio_backtester") ->
+      Map.has_key?(function_results, "portfolio_constructor") and
+          not Map.has_key?(function_results, "portfolio_backtester") ->
         portfolio = function_results["portfolio_constructor"]
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => "I'll run a backtest to evaluate this portfolio's historical performance.",
-                "tool_calls" => [
-                  %{
-                    "function" => %{
-                      "name" => "portfolio_backtester",
-                      "arguments" => Jason.encode!(%{
-                        "portfolio" => portfolio
-                      })
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }}
+
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" =>
+                   "I'll run a backtest to evaluate this portfolio's historical performance.",
+                 "tool_calls" => [
+                   %{
+                     "function" => %{
+                       "name" => "portfolio_backtester",
+                       "arguments" =>
+                         Jason.encode!(%{
+                           "portfolio" => portfolio
+                         })
+                     }
+                   }
+                 ]
+               }
+             }
+           ]
+         }}
 
       # Portfolio optimization requests
-      Map.has_key?(function_results, "portfolio_constructor") and risk_adjustment_requested?(question) ->
+      Map.has_key?(function_results, "portfolio_constructor") and
+          risk_adjustment_requested?(question) ->
         current_portfolio = function_results["portfolio_constructor"]
-        risk_preference = if String.contains?(question, ["lower", "reduce", "safer"]), do: "Lower", else: "Higher"
 
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => "I'll adjust the portfolio for #{String.downcase(risk_preference)} risk.",
-                "tool_calls" => [
-                  %{
-                    "function" => %{
-                      "name" => "portfolio_optimizer",
-                      "arguments" => Jason.encode!(%{
-                        "portfolio" => current_portfolio,
-                        "preferences" => %{
-                          "risk_tolerance" => risk_preference
-                        }
-                      })
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }}
+        risk_preference =
+          if String.contains?(question, ["lower", "reduce", "safer"]), do: "Lower", else: "Higher"
+
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" =>
+                   "I'll adjust the portfolio for #{String.downcase(risk_preference)} risk.",
+                 "tool_calls" => [
+                   %{
+                     "function" => %{
+                       "name" => "portfolio_optimizer",
+                       "arguments" =>
+                         Jason.encode!(%{
+                           "portfolio" => current_portfolio,
+                           "preferences" => %{
+                             "risk_tolerance" => risk_preference
+                           }
+                         })
+                     }
+                   }
+                 ]
+               }
+             }
+           ]
+         }}
 
       # Final analysis after getting all results
       Map.has_key?(function_results, "portfolio_backtester") ->
         portfolio = function_results["portfolio_constructor"]
         backtest = function_results["portfolio_backtester"]
 
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => generate_portfolio_analysis(portfolio, backtest)
-              }
-            }
-          ]
-        }}
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" => generate_portfolio_analysis(portfolio, backtest)
+               }
+             }
+           ]
+         }}
 
       String.contains?(question, "error") ->
         {:error, "Simulated investment analysis error"}
 
       true ->
-        {:ok, %{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => "I need more information about your investment goals to assist you effectively.",
-                "role" => "assistant"
-              }
-            }
-          ]
-        }}
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" =>
+                   "I need more information about your investment goals to assist you effectively.",
+                 "role" => "assistant"
+               }
+             }
+           ]
+         }}
     end
   end
 
@@ -170,6 +190,7 @@ defmodule MockInvestmentProvider do
 
   defp determine_risk_profile(question) do
     question = String.downcase(question)
+
     cond do
       String.contains?(question, ["conservative", "safe", "low risk"]) -> "Conservative"
       String.contains?(question, ["aggressive", "high risk", "growth"]) -> "Aggressive"
@@ -179,8 +200,9 @@ defmodule MockInvestmentProvider do
 
   defp risk_adjustment_requested?(question) do
     question = String.downcase(question)
+
     String.contains?(question, ["risk"]) and
-      (String.contains?(question, ["lower", "higher", "reduce", "increase"]))
+      String.contains?(question, ["lower", "higher", "reduce", "increase"])
   end
 
   defp extract_etfs(screener_result) do
@@ -333,23 +355,29 @@ defmodule LLMAgent.Examples.InvestmentTools do
   end
 
   def create_portfolio(%{"risk_profile" => risk_profile}) do
-    allocations = case risk_profile do
-      "Conservative" -> [
-        %{ticker: "BND", allocation: 0.6},
-        %{ticker: "VTI", allocation: 0.3},
-        %{ticker: "VEA", allocation: 0.1}
-      ]
-      "Moderate" -> [
-        %{ticker: "VTI", allocation: 0.6},
-        %{ticker: "BND", allocation: 0.3},
-        %{ticker: "VEA", allocation: 0.1}
-      ]
-      "Aggressive" -> [
-        %{ticker: "VTI", allocation: 0.7},
-        %{ticker: "VEA", allocation: 0.2},
-        %{ticker: "BND", allocation: 0.1}
-      ]
-    end
+    allocations =
+      case risk_profile do
+        "Conservative" ->
+          [
+            %{ticker: "BND", allocation: 0.6},
+            %{ticker: "VTI", allocation: 0.3},
+            %{ticker: "VEA", allocation: 0.1}
+          ]
+
+        "Moderate" ->
+          [
+            %{ticker: "VTI", allocation: 0.6},
+            %{ticker: "BND", allocation: 0.3},
+            %{ticker: "VEA", allocation: 0.1}
+          ]
+
+        "Aggressive" ->
+          [
+            %{ticker: "VTI", allocation: 0.7},
+            %{ticker: "VEA", allocation: 0.2},
+            %{ticker: "BND", allocation: 0.1}
+          ]
+      end
 
     expected_return = calculate_expected_return(allocations)
 
@@ -373,16 +401,20 @@ defmodule LLMAgent.Examples.InvestmentTools do
     }
   end
 
-  def optimize_portfolio(%{"portfolio" => portfolio, "preferences" => %{"risk_tolerance" => risk_tolerance}}) do
+  def optimize_portfolio(%{
+        "portfolio" => portfolio,
+        "preferences" => %{"risk_tolerance" => risk_tolerance}
+      }) do
     current_profile = portfolio.risk_profile
 
-    new_profile = case {current_profile, risk_tolerance} do
-      {"Aggressive", "Lower"} -> "Moderate"
-      {"Moderate", "Lower"} -> "Conservative"
-      {"Conservative", "Higher"} -> "Moderate"
-      {"Moderate", "Higher"} -> "Aggressive"
-      _ -> current_profile
-    end
+    new_profile =
+      case {current_profile, risk_tolerance} do
+        {"Aggressive", "Lower"} -> "Moderate"
+        {"Moderate", "Lower"} -> "Conservative"
+        {"Conservative", "Higher"} -> "Moderate"
+        {"Moderate", "Higher"} -> "Aggressive"
+        _ -> current_profile
+      end
 
     create_portfolio(%{"risk_profile" => new_profile})
   end
@@ -397,7 +429,7 @@ defmodule LLMAgent.Examples.InvestmentTools do
     }
 
     Enum.reduce(allocations, 0, fn alloc, acc ->
-      acc + (returns[alloc.ticker] * alloc.allocation)
+      acc + returns[alloc.ticker] * alloc.allocation
     end)
   end
 end
@@ -414,7 +446,7 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     Application.put_env(:llm_agent, :provider, MockInvestmentProvider)
 
     # 2. Create store for this example
-    store_name = :"investment_advisor_store"
+    store_name = :investment_advisor_store
     _store = Store.start_link(name: store_name)
 
     # 3. Create system prompt for investment advisor
@@ -430,11 +462,12 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     """
 
     # 4. Create conversation flow with investment tools
-    {flow, state} = Flows.tool_agent(
-      system_prompt,
-      LLMAgent.Examples.InvestmentTools.get_tools(),
-      store_name: store_name
-    )
+    {flow, state} =
+      Flows.tool_agent(
+        system_prompt,
+        LLMAgent.Examples.InvestmentTools.get_tools(),
+        store_name: store_name
+      )
 
     IO.puts("\n=== Investment Portfolio Advisor Example ===\n")
     IO.puts("This example demonstrates:")
@@ -477,19 +510,24 @@ defmodule LLMAgent.Examples.InvestmentDemo do
       case message do
         %{role: "system"} ->
           IO.puts("\nAdvisor System: #{message.content}")
+
         %{role: "user"} ->
           IO.puts("\nClient: #{message.content}")
+
         %{role: "assistant"} ->
           IO.puts("Advisor: #{message.content}")
+
         %{role: "function", name: name} ->
           IO.puts("\nAnalysis (#{name}):")
           IO.puts(format_tool_result(name, message.content))
+
         _ ->
           IO.puts("#{String.capitalize(message.role)}: #{message.content}")
       end
     end)
 
     IO.puts("\n=== Example Complete ===")
+
     IO.puts("""
 
     To use this in your own application:
@@ -550,27 +588,26 @@ defmodule LLMAgent.Examples.InvestmentDemo do
   # Format tool results for display
   defp format_tool_result("etf_screener", result) do
     result = Jason.decode!(result)
+
     """
     Found #{result["count"]} ETFs:
-    #{Enum.map_join(result["etfs"], "\n", fn etf ->
-      "- #{etf["ticker"]}: #{etf["name"]} (Risk: #{etf["risk_level"]})"
-    end)}
+    #{Enum.map_join(result["etfs"], "\n", fn etf -> "- #{etf["ticker"]}: #{etf["name"]} (Risk: #{etf["risk_level"]})" end)}
     """
   end
 
   defp format_tool_result("portfolio_constructor", result) do
     result = Jason.decode!(result)
+
     """
     Created #{String.downcase(result["risk_profile"])} risk portfolio:
-    #{Enum.map_join(result["allocations"], "\n", fn alloc ->
-      "- #{alloc["ticker"]}: #{Float.round(alloc["allocation"] * 100, 1)}%"
-    end)}
+    #{Enum.map_join(result["allocations"], "\n", fn alloc -> "- #{alloc["ticker"]}: #{Float.round(alloc["allocation"] * 100, 1)}%" end)}
     Expected return: #{Float.round(result["expected_return"], 2)}%
     """
   end
 
   defp format_tool_result("portfolio_backtester", result) do
     result = Jason.decode!(result)
+
     """
     Backtest results (#{result["years"]} years):
     - CAGR: #{Float.round(result["cagr"], 2)}%

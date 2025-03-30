@@ -6,343 +6,228 @@ defmodule LLMAgent.HandlersTest do
 
   use ExUnit.Case
 
-  alias LLMAgent.{Handlers, Signals}
+  alias LLMAgent.{Handlers, Signals, Store}
+
+  setup do
+    store_name = String.to_atom("handler_test_#{System.unique_integer([:positive])}")
+    store = Store.start_link(name: store_name)
+
+    on_exit(fn ->
+      if pid = Process.whereis(store_name) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    %{store_name: store_name}
+  end
 
   describe "message_handler/2" do
-    test "processes a user message and updates state" do
+    test "processes a user message and updates store", %{store_name: store_name} do
       # Setup
       message = "What is the weather like today?"
       signal = Signals.user_message(message)
-      state = %{history: []}
+      state = %{store_name: store_name}
 
       # Execute handler
-      {result, updated_state} = Handlers.message_handler(signal, state)
+      {result, _updated_state} = Handlers.message_handler(signal, state)
 
-      # Verify state updates
-      assert updated_state.history != []
+      # Verify store updates
+      history = Store.get_llm_history(store_name)
+      assert length(history) > 0
+      assert Enum.any?(history, &(&1.role == "user" and &1.content == message))
 
-      # Verify result type - don't assume response type since implementation may vary
-      assert is_tuple(result)
-      assert elem(result, 0) in [:emit, :done, :next, :skip]
+      # Verify result type
+      assert match?({{:emit, _}, _}, result)
     end
   end
 
   describe "thinking_handler/2" do
-    test "processes a thinking signal and returns a proper AgentForge signal" do
-      # Setup with a realistic scenario
+    test "processes a thinking signal and updates store", %{store_name: store_name} do
+      # Setup initial state
+      Store.add_message(store_name, "system", "You are a helpful assistant.")
+      Store.add_message(store_name, "user", "What's the weather like today?")
+
+      # Setup thinking signal
       thought = "I need to check the weather API"
       signal = Signals.thinking(thought, 1)
-
-      state = %{
-        history: [
-          %{role: "system", content: "You are a helpful assistant."},
-          %{role: "user", content: "What's the weather like today?"}
-        ],
-        thoughts: []
-      }
-
-      # Execute handler with actual LLM logic
-      {result, updated_state} = Handlers.thinking_handler(signal, state)
-
-      # Verify thoughts were properly stored in state
-      assert thought in Map.get(updated_state, :thoughts, [])
-
-      # Verify history is properly maintained
-      assert length(Map.get(updated_state, :history, [])) >= 2
-
-      # Verify result format
-      assert match?({{:emit, _signal}, _}, {result, updated_state})
-
-      # Extract the signal for further validation
-      {{:emit, signal}, _} = {result, updated_state}
-      assert is_map(signal)
-      assert Map.has_key?(signal, :type)
-      assert is_atom(signal.type)
-      assert signal.type in [:tool_call, :response, :thinking]
-    end
-
-    test "handles empty conversation history gracefully" do
-      # Setup with minimal state
-      signal = Signals.thinking("Just thinking", 1)
-      empty_state = %{history: []}
+      state = %{store_name: store_name}
 
       # Execute handler
-      {result, updated_state} = Handlers.thinking_handler(signal, empty_state)
+      {result, _updated_state} = Handlers.thinking_handler(signal, state)
 
-      # Verify handler doesn't crash with empty history
-      assert is_map(updated_state)
-      assert is_tuple(result)
+      # Verify thoughts were stored
+      thoughts = Store.get_thoughts(store_name)
+      assert thought in thoughts
+
+      # Verify result format
+      assert match?({{:emit, _signal}, _}, result)
+
+      # Extract the signal for validation
+      {{:emit, signal}, _} = result
+      assert is_map(signal)
+      assert Map.has_key?(signal, :type)
+      assert signal.type in [:tool_call, :response, :thinking]
     end
   end
 
   describe "tool_handler/2" do
-    test "processes a tool call signal and emits an AgentForge signal" do
-      # Setup a realistic tool
+    test "processes a tool call and updates store", %{store_name: store_name} do
+      # Setup a calculator tool
       tool_name = "calculator"
       args = %{expression: "1 + 2"}
       signal = Signals.tool_call(tool_name, args)
 
-      # Create a realistic tool definition
-      tools = [
-        %{
-          name: "calculator",
-          description: "Performs basic arithmetic calculations",
-          parameters: %{
-            type: "object",
-            properties: %{
-              expression: %{
-                type: "string",
-                description: "The arithmetic expression to evaluate"
-              }
-            }
-          },
-          function: fn %{expression: expr} ->
-            {op1, op, op2} =
-              expr
-              |> String.split(" ", trim: true)
-              |> List.to_tuple()
-
-            case op do
-              "+" -> %{result: String.to_integer(op1) + String.to_integer(op2)}
-              "-" -> %{result: String.to_integer(op1) - String.to_integer(op2)}
-              "*" -> %{result: String.to_integer(op1) * String.to_integer(op2)}
-              "/" -> %{result: String.to_integer(op1) / String.to_integer(op2)}
-              _ -> %{error: "Unsupported operation: #{op}"}
-            end
-          end
-        }
-      ]
-
-      # Create state
-      state = %{
-        available_tools: tools,
-        history: [
-          %{role: "system", content: "You are a helpful assistant with calculator capabilities."},
-          %{role: "user", content: "Calculate 1 + 2"},
-          %{role: "assistant", content: "I'll use the calculator tool."}
-        ]
+      # Create state with tool
+      calculator = %{
+        name: "calculator",
+        description: "Performs calculations",
+        execute: fn %{"expression" => expr} ->
+          {result, _} = Code.eval_string(expr)
+          %{result: result}
+        end
       }
 
-      # Execute the handler
-      {result, updated_state} = Handlers.tool_handler(signal, state)
+      state = %{
+        store_name: store_name,
+        available_tools: [calculator],
+        tool_registry: fn name ->
+          if name == "calculator" do
+            {:ok, calculator.execute}
+          else
+            {:error, "Tool not found"}
+          end
+        end
+      }
 
-      # Verify result is an emit instruction with the proper signal
-      assert match?({{:emit, _signal}, _}, {result, updated_state})
+      # Execute handler
+      {result, _updated_state} = Handlers.tool_handler(signal, state)
 
-      # Extract and verify the emitted signal
-      {{:emit, emitted_signal}, _} = {result, updated_state}
-      assert emitted_signal.type == :tool_result
-      assert is_map(emitted_signal.data)
-      assert Map.has_key?(emitted_signal.data, :name)
-      assert emitted_signal.data.name == "calculator"
+      # Verify tool call was recorded
+      history = Store.get_llm_history(store_name)
+      assert Enum.any?(history, &(&1.role == "function" and &1.name == tool_name))
+
+      # Verify result
+      assert match?({{:emit, _}, _}, result)
+      {{:emit, signal}, _} = result
+      assert signal.type == :tool_result
     end
 
-    test "handles tool errors gracefully" do
-      # Test with a tool that will generate an error
+    test "handles tool errors gracefully", %{store_name: store_name} do
       tool_name = "error_tool"
       args = %{}
       signal = Signals.tool_call(tool_name, args)
 
-      # Define a tool that will generate an error
-      tools = [
-        %{
-          name: "error_tool",
-          function: fn _ -> %{error: "This tool always fails"} end
-        }
-      ]
-
-      state = %{available_tools: tools}
+      state = %{
+        store_name: store_name,
+        tool_registry: fn _name -> {:error, "Tool not found"} end
+      }
 
       # Execute handler
-      {result, updated_state} = Handlers.tool_handler(signal, state)
+      {result, _updated_state} = Handlers.tool_handler(signal, state)
 
-      # Should still emit a valid signal with error information
-      assert match?({{:emit, _}, _}, {result, updated_state})
-      {{:emit, signal}, _} = {result, updated_state}
+      # Verify error was recorded
+      history = Store.get_llm_history(store_name)
 
-      # Errors produce error signals
-      assert signal.type == :error
-      assert Map.has_key?(signal.data, :message)
+      assert Enum.any?(
+               history,
+               &(&1.role == "assistant" and String.contains?(&1.content, "error"))
+             )
+
+      # Verify error signal
+      assert match?({{:emit, %{type: :error}}, _}, result)
     end
   end
 
   describe "tool_result_handler/2" do
-    test "processes a tool result and continues the conversation with thinking" do
-      # Setup a realistic scenario with history
+    test "processes tool result and updates store", %{store_name: store_name} do
+      # Setup initial state
+      Store.add_message(store_name, "system", "You are a helpful assistant.")
+      Store.add_message(store_name, "user", "What is 40 + 2?")
+
+      # Setup tool result
       tool_name = "calculator"
       tool_result = %{result: 42}
       signal = Signals.tool_result(tool_name, tool_result)
 
-      # Create state with existing conversation history
       state = %{
-        history: [
-          %{role: "system", content: "You are a helpful assistant with calculator capabilities."},
-          %{role: "user", content: "What is 40 + 2?"},
-          %{role: "assistant", content: "I'll use the calculator tool."}
-        ],
-        pending_tools: [%{id: "calc-123", name: "calculator", args: %{expression: "40 + 2"}}]
-      }
-
-      # Execute the handler
-      {result, updated_state} = Handlers.tool_result_handler(signal, state)
-
-      # Verify signal is emitted correctly
-      assert match?({{:emit, _signal}, _}, {result, updated_state})
-      {{:emit, emitted_signal}, _} = {result, updated_state}
-
-      # Verify signal is a valid type
-      assert emitted_signal.type == :response
-
-      # Verify history includes tool result
-      history = Map.get(updated_state, :history, [])
-
-      assert Enum.any?(history, fn entry ->
-               Map.get(entry, :role) == "function" && Map.get(entry, :name) == tool_name
-             end)
-
-      # Verify pending tools were updated
-      assert Map.get(updated_state, :pending_tools) == []
-    end
-
-    test "handles error results gracefully" do
-      # Setup with error result
-      tool_name = "search_api"
-      error_result = %{error: "API rate limit exceeded"}
-      signal = Signals.tool_result(tool_name, error_result)
-
-      # Create state with existing conversation
-      state = %{
-        history: [
-          %{role: "system", content: "You are a helpful assistant with search capabilities."},
-          %{role: "user", content: "Search for the latest news"}
-        ],
-        pending_tools: [%{id: "search-123", name: "search_api", args: %{query: "latest news"}}]
+        store_name: store_name,
+        available_tools: []
       }
 
       # Execute handler
-      {result, updated_state} = Handlers.tool_result_handler(signal, state)
+      {result, _updated_state} = Handlers.tool_result_handler(signal, state)
 
-      # Should still emit a valid signal
-      assert match?({{:emit, _signal}, _}, {result, updated_state})
-      # The state should be updated
-      assert updated_state != state
+      # Verify tool result was recorded
+      history = Store.get_llm_history(store_name)
+      assert Enum.any?(history, &(&1.role == "function" and &1.name == tool_name))
+
+      # Verify response
+      assert match?({{:emit, _}, _}, result)
     end
   end
 
   describe "response_handler/2" do
-    test "processes a response signal and emits AgentForge signals correctly" do
-      # Setup with realistic response content
-      content = "The weather today in San Francisco is sunny with a high of 75°F."
+    test "processes response with custom formatter", %{store_name: store_name} do
+      content = "The result is 42"
       signal = Signals.response(content)
 
-      # Create state with conversation history
-      state = %{
-        history: [
-          %{
-            role: "system",
-            content: "You are a helpful AI assistant that provides weather information."
-          },
-          %{role: "user", content: "What's the weather like in San Francisco today?"},
-          %{
-            role: "assistant",
-            thinking: "I should provide the current weather for San Francisco."
-          }
-        ]
-      }
+      formatter = fn content -> "Formatted: #{content}" end
+      state = %{store_name: store_name, response_formatter: formatter}
 
-      # Execute handler
-      {result, updated_state} = Handlers.response_handler(signal, state)
+      {result, _updated_state} = Handlers.response_handler(signal, state)
 
-      # Verify response is properly halted
-      assert match?({{:halt, _signal}, _}, {result, updated_state})
-
-      # Verify signal has correct type and content
-      {{:halt, response_signal}, _} = {result, updated_state}
-      assert response_signal.type == :response
-      assert response_signal.data == content
+      assert match?({{:halt, %{data: "Formatted: " <> _}}, _}, result)
     end
 
-    test "properly handles structured responses" do
-      # Setup with structured content like markdown or JSON
-      structured_content = """
-      # Weather Report
+    test "processes response without formatter", %{store_name: store_name} do
+      content = "The result is 42"
+      signal = Signals.response(content)
+      state = %{store_name: store_name}
 
-      - **City**: San Francisco
-      - **Condition**: Sunny
-      - **Temperature**: 75°F
-      """
+      {result, _updated_state} = Handlers.response_handler(signal, state)
 
-      signal = Signals.response(structured_content)
-      state = %{}
-
-      # Execute handler
-      {result, updated_state} = Handlers.response_handler(signal, state)
-
-      # Verify structured content is preserved
-      {{:halt, response_signal}, _} = {result, updated_state}
-      assert response_signal.data == structured_content
+      assert match?({{:halt, %{data: ^content}}, _}, result)
     end
   end
 
   describe "error_handler/2" do
-    test "processes an error signal and emits a proper AgentForge recovery signal" do
-      # Setup with realistic error scenario
-      message = "Rate limit exceeded for weather API"
-      source = "tool_execution"
+    test "processes error and updates store", %{store_name: store_name} do
+      # Setup error signal
+      message = "API rate limit exceeded"
+      source = "tool_call"
       signal = Signals.error(message, source)
-
-      # Create state with context for the error
-      state = %{
-        history: [
-          %{
-            role: "system",
-            content: "You are a helpful AI assistant with access to weather information."
-          },
-          %{role: "user", content: "What's the weather in Seoul today?"}
-        ],
-        pending_tools: [%{id: "weather-123", name: "get_weather", args: %{location: "Seoul"}}],
-        errors: []
-      }
+      state = %{store_name: store_name}
 
       # Execute handler
-      {result, updated_state} = Handlers.error_handler(signal, state)
+      {result, _updated_state} = Handlers.error_handler(signal, state)
 
-      # Verify signal is emitted
-      assert match?({{:emit, _signal}, _}, {result, updated_state})
+      # Verify error was recorded in history
+      history = Store.get_llm_history(store_name)
 
-      # Verify the signal is properly formatted for recovery
-      {{:emit, recovery_signal}, _} = {result, updated_state}
-      assert is_atom(recovery_signal.type)
+      assert Enum.any?(
+               history,
+               &(&1.role == "assistant" and String.contains?(&1.content, "error"))
+             )
 
-      # Verify error is recorded in state
-      errors = Map.get(updated_state, :errors, [])
-      assert length(errors) > 0
-
-      # Verify error information
-      assert Enum.any?(errors, fn error ->
-               case error do
-                 {:generic_error, msg, _timestamp} when is_binary(msg) ->
-                   String.contains?(msg, message)
-
-                 _ ->
-                   false
-               end
-             end)
+      # Verify response signal
+      assert match?({{:emit, %{type: :response}}, _}, result)
     end
 
-    test "handles critical errors with appropriate signal" do
-      # Setup a critical/unrecoverable error
-      message = "Authentication failed - API key invalid"
-      source = "authentication"
-      signal = Signals.error(message, source, %{critical: true})
-      state = %{errors: []}
+    test "handles different error types correctly", %{store_name: store_name} do
+      error_types = [
+        {"llm_call", "LLM API error"},
+        {"tool_call", "Tool not found"},
+        {"tool_result", "Invalid result format"},
+        {"unknown", "Generic error"}
+      ]
 
-      # Execute handler
-      {result, updated_state} = Handlers.error_handler(signal, state)
+      Enum.each(error_types, fn {source, message} ->
+        signal = Signals.error(message, source)
+        state = %{store_name: store_name}
 
-      # Verify error is properly handled
-      assert match?({_, _}, {result, updated_state})
-      assert length(Map.get(updated_state, :errors, [])) > 0
+        {result, _} = Handlers.error_handler(signal, state)
+        assert match?({{:emit, %{type: :response}}, _}, result)
+      end)
     end
   end
 end
