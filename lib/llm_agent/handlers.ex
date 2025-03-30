@@ -25,6 +25,8 @@ defmodule LLMAgent.Handlers do
   """
   def message_handler(%{type: :user_message} = signal, %{store_name: _} = state) do
     Logger.info("Processing user message: #{inspect(signal.data)}")
+    Logger.debug("MessageHandler - Signal: #{inspect(signal)}")
+    Logger.debug("MessageHandler - State: #{inspect(state)}")
     store_name = get_store_name(state)
 
     # Store the user message in history
@@ -39,6 +41,9 @@ defmodule LLMAgent.Handlers do
 
     # Call LLM with updated context
     try do
+      Logger.debug("MessageHandler - Calling LLM with provider: #{inspect(provider)}")
+      Logger.debug("MessageHandler - History: #{inspect(history)}")
+
       llm_result =
         LLMAgent.Plugin.call_llm(%{
           "provider" => provider,
@@ -46,6 +51,8 @@ defmodule LLMAgent.Handlers do
           "tools" => tools,
           "options" => Map.get(state, :llm_options, %{})
         })
+
+      Logger.debug("MessageHandler - LLM result: #{inspect(llm_result)}")
 
       cond do
         has_tool_calls?(llm_result) ->
@@ -57,15 +64,26 @@ defmodule LLMAgent.Handlers do
             args: first_tool.arguments
           }
 
+          Logger.debug("MessageHandler - Extracted tool call: #{inspect(tool_data)}")
           {{:emit, Signals.tool_call(tool_data.name, tool_data.args)}, state}
 
         contains_thinking_marker?(llm_result) ->
           thought = extract_content(llm_result)
+          Logger.debug("MessageHandler - Extracted thinking: #{inspect(thought)}")
           Store.add_thought(store_name, thought)
           {{:emit, Signals.thinking(thought, 1)}, state}
 
         true ->
           content = extract_content(llm_result)
+          Logger.debug("MessageHandler - Extracted content: #{inspect(content)}")
+
+          # 确保内容不为空
+          content =
+            if content == "" or is_nil(content),
+              do: "I don't have a specific answer for that question.",
+              else: content
+
+          Logger.debug("MessageHandler - Final content: #{inspect(content)}")
           Store.add_message(store_name, "assistant", content)
           {{:emit, Signals.response(content)}, state}
       end
@@ -85,6 +103,8 @@ defmodule LLMAgent.Handlers do
   """
   def thinking_handler(%{type: :thinking} = signal, %{store_name: _} = state) do
     Logger.info("Processing thinking step: #{inspect(signal.data)}")
+    Logger.debug("ThinkingHandler - Signal: #{inspect(signal)}")
+    Logger.debug("ThinkingHandler - State: #{inspect(state)}")
     store_name = get_store_name(state)
 
     # Get current step and thought
@@ -145,11 +165,12 @@ defmodule LLMAgent.Handlers do
   The state must be a map containing :store_name.
   """
   def tool_handler(%{type: :tool_call} = signal, %{store_name: _} = state) do
+    Logger.info("Tool call: #{signal.data.name} with args: #{inspect(signal.data.args)}")
+    Logger.debug("ToolHandler - Signal: #{inspect(signal)}")
+    Logger.debug("ToolHandler - State: #{inspect(state)}")
     store_name = get_store_name(state)
     tool_name = signal.data.name
     tool_args = signal.data.args
-
-    Logger.info("Tool call: #{tool_name} with args: #{inspect(tool_args)}")
 
     tool_registry = Map.get(state, :tool_registry, &AgentForge.Tools.get/1)
 
@@ -182,6 +203,9 @@ defmodule LLMAgent.Handlers do
   The state must be a map containing :store_name.
   """
   def tool_result_handler(%{type: :tool_result} = signal, %{store_name: _} = state) do
+    Logger.info("Processing tool result: #{inspect(signal.data)}")
+    Logger.debug("ToolResultHandler - Signal: #{inspect(signal)}")
+    Logger.debug("ToolResultHandler - State: #{inspect(state)}")
     store_name = get_store_name(state)
     Logger.info("Processing tool result: #{inspect(signal.data)}")
 
@@ -237,6 +261,9 @@ defmodule LLMAgent.Handlers do
   Handles task state signals.
   """
   def task_handler(%{type: :task_state} = signal, %{store_name: _} = state) do
+    Logger.info("Task state: #{inspect(signal.data)}")
+    Logger.debug("TaskHandler - Signal: #{inspect(signal)}")
+    Logger.debug("TaskHandler - State: #{inspect(state)}")
     store_name = get_store_name(state)
     task_id = signal.data.task_id
     task_state = signal.data.state
@@ -252,6 +279,9 @@ defmodule LLMAgent.Handlers do
   Handles response signals.
   """
   def response_handler(%{type: :response} = signal, %{store_name: _} = state) do
+    Logger.info("Response: #{inspect(signal.data)}")
+    Logger.debug("ResponseHandler - Signal: #{inspect(signal)}")
+    Logger.debug("ResponseHandler - State: #{inspect(state)}")
     formatter = Map.get(state, :response_formatter)
 
     formatted_response =
@@ -284,11 +314,15 @@ defmodule LLMAgent.Handlers do
   The state must be a map containing :store_name.
   """
   def error_handler(%{type: :error} = signal, %{store_name: _} = state) do
+    Logger.error(
+      "LLMAgent error in #{signal.data.source}: #{signal.data.message}\nSignal: #{inspect(signal)}"
+    )
+
+    Logger.debug("ErrorHandler - Signal: #{inspect(signal)}")
+    Logger.debug("ErrorHandler - State: #{inspect(state)}")
     store_name = get_store_name(state)
     message = signal.data.message
     source = signal.data.source
-
-    Logger.error("LLMAgent error in #{source}: #{message}\nSignal: #{inspect(signal)}")
 
     {response, error_type} =
       case source do
@@ -386,7 +420,19 @@ defmodule LLMAgent.Handlers do
   end
 
   defp extract_content(llm_result) do
-    case llm_result do
+    # 首先处理可能由元组包装的响应，这是 MockElixirQAProvider 返回的格式
+    result =
+      case llm_result do
+        {:ok, data} ->
+          Logger.debug("Extract_content - Unwrapping {:ok, data} format")
+          data
+
+        other ->
+          other
+      end
+
+    # 然后从不同可能的位置提取内容
+    case result do
       %{"content" => content} when is_binary(content) ->
         content
 
@@ -399,10 +445,24 @@ defmodule LLMAgent.Handlers do
       %{"choices" => [%{"text" => content} | _]} when is_binary(content) ->
         content
 
+      # 深层嵌套数据的情况
       %{"choices" => [first | _]} ->
-        get_in(first, ["message", "content"]) || ""
+        content = get_in(first, ["message", "content"])
+        if is_binary(content), do: content, else: ""
 
+      # 处理包含类型和内容的格式
+      %{"type" => "response", "content" => content} when is_binary(content) ->
+        content
+
+      %{"type" => "thinking", "thought" => thought} when is_binary(thought) ->
+        thought
+
+      # 回退为空字符串
       _ ->
+        Logger.warning(
+          "Extract_content - Could not extract content from response: #{inspect(result)}"
+        )
+
         ""
     end
   end

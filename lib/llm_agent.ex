@@ -86,20 +86,18 @@ defmodule LLMAgent do
   end
 
   @doc """
-  Processes a user message through an LLM agent flow.
-
-  This is a convenience function that creates a user message signal and processes it through the agent flow.
+  Process a user message through an agent flow.
 
   ## Parameters
 
-  - `flow` - The agent flow to process the message through
-  - `state` - The current state of the agent
-  - `message` - The user message to process
-  - `options` - Additional options for processing the message
+  - `flow` - Flow to process the message with (function or list of handlers)
+  - `state` - Current agent state
+  - `message` - User message to process
+  - `options` - Processing options
 
   ## Returns
 
-  A tuple containing the result of processing the message and the new state.
+  Result of processing the message through the flow.
 
   ## Examples
 
@@ -109,9 +107,57 @@ defmodule LLMAgent do
       true
   """
   def process(flow, state, message, options \\ []) do
-    signal = LLMAgent.Signals.user_message(message)
-    timeout = Keyword.get(options, :timeout, 30_000)
+    require Logger
 
-    AgentForge.Flow.process_with_limits(flow, signal, state, timeout_ms: timeout)
+    signal = LLMAgent.Signals.user_message(message)
+    Logger.debug("LLMAgent.process - Input signal: #{inspect(signal)}")
+    Logger.debug("LLMAgent.process - Initial state: #{inspect(state)}")
+
+    # Set default options for processing
+    flow_options = [
+      # Allow handlers to skip without terminating the chain
+      continue_on_skip: true,
+      # Forward emitted signals to next handler
+      signal_strategy: :forward,
+      timeout_ms: Keyword.get(options, :timeout_ms, 30_000),
+      return_stats: Keyword.get(options, :return_stats, false)
+    ]
+
+    # Execute the flow based on its type
+    flow_type = type_of(flow)
+    Logger.debug("LLMAgent.process - Executing flow (type: #{inspect(flow_type)})")
+
+    result =
+      case flow_type do
+        "function" ->
+          # Use the new process_function_flow API for function flows
+          AgentForge.Flow.process_function_flow(flow, signal, state, flow_options)
+
+        "list" ->
+          # Use process_with_limits for handler lists
+          AgentForge.Flow.process_with_limits(flow, signal, state, flow_options)
+
+        _ ->
+          Logger.error("LLMAgent.process - Unknown flow type: #{inspect(flow)}")
+          {:error, "Unknown flow type", state}
+      end
+
+    Logger.debug("LLMAgent.process - Flow result: #{inspect(result)}")
+
+    # Handle potential nil results from skipped handlers
+    case result do
+      {:ok, nil, new_state} ->
+        # Create a default response when all handlers skipped
+        default_response = LLMAgent.Signals.response("No handler processed this message")
+        {:ok, default_response, new_state}
+
+      _ ->
+        result
+    end
   end
+
+  # Helper to determine the type of flow for debugging
+  defp type_of(flow) when is_function(flow), do: "function"
+  defp type_of(flow) when is_list(flow), do: "list"
+  defp type_of(_), do: "unknown"
 end

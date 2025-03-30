@@ -47,19 +47,143 @@ defmodule LLMAgent.Flows do
 
     # Initialize store and add system prompt
     store_name = Keyword.get(options, :store_name, LLMAgent.Store)
+    initial_state = Map.put(initial_state, :store_name, store_name)
     Store.new(%{}, name: store_name)
     Store.add_message(store_name, "system", system_prompt)
 
-    # Create flow with standard handlers
+    # Create a function flow that will be processed with AgentForge.Flow.process_function_flow
+    # This approach leverages AgentForge 0.2.2's improved signal handling
     flow = fn signal, state ->
-      state
-      |> handle_with(&Handlers.message_handler/2, signal)
-      |> handle_with(&Handlers.thinking_handler/2, signal)
-      |> handle_with(&Handlers.tool_handler/2, signal)
-      |> handle_with(&Handlers.tool_result_handler/2, signal)
-      |> handle_with(&Handlers.task_handler/2, signal)
-      |> handle_with(&Handlers.response_handler/2, signal)
-      |> handle_with(&Handlers.error_handler/2, signal)
+      require Logger
+      Logger.debug("Conversation flow - Processing signal: #{inspect(signal.type)}")
+
+      # Determine appropriate handler based on signal type
+      result =
+        case signal.type do
+          :user_message ->
+            # User message flow path
+            Logger.debug("Conversation flow - Processing user message")
+
+            case Handlers.message_handler(signal, state) do
+              {{:emit, response_signal}, new_state} ->
+                {:emit, response_signal, new_state}
+
+              {:skip, new_state} ->
+                {:skip, new_state}
+
+              other ->
+                Logger.warning("Unexpected message handler result: #{inspect(other)}")
+                {:skip, state}
+            end
+
+          :thinking ->
+            # Thinking flow path
+            Logger.debug("Conversation flow - Processing thinking signal")
+
+            case Handlers.thinking_handler(signal, state) do
+              {{:emit, new_signal}, new_state} ->
+                {:emit, new_signal, new_state}
+
+              {:skip, new_state} ->
+                {:skip, new_state}
+
+              other ->
+                Logger.warning("Unexpected thinking handler result: #{inspect(other)}")
+                {:skip, state}
+            end
+
+          :tool_call ->
+            # Tool call flow path
+            Logger.debug("Conversation flow - Processing tool call signal")
+
+            case Handlers.tool_handler(signal, state) do
+              {{:emit, new_signal}, new_state} ->
+                {:emit, new_signal, new_state}
+
+              {:skip, new_state} ->
+                {:skip, new_state}
+
+              other ->
+                Logger.warning("Unexpected tool handler result: #{inspect(other)}")
+                {:skip, state}
+            end
+
+          :tool_result ->
+            # Tool result flow path
+            Logger.debug("Conversation flow - Processing tool result signal")
+
+            case Handlers.tool_result_handler(signal, state) do
+              {{:emit, new_signal}, new_state} ->
+                {:emit, new_signal, new_state}
+
+              {:skip, new_state} ->
+                {:skip, new_state}
+
+              other ->
+                Logger.warning("Unexpected tool result handler result: #{inspect(other)}")
+                {:skip, state}
+            end
+
+          :task ->
+            # Task flow path
+            Logger.debug("Conversation flow - Processing task signal")
+
+            case Handlers.task_handler(signal, state) do
+              {{:emit, new_signal}, new_state} ->
+                {:emit, new_signal, new_state}
+
+              {:skip, new_state} ->
+                {:skip, new_state}
+
+              other ->
+                Logger.warning("Unexpected task handler result: #{inspect(other)}")
+                {:skip, state}
+            end
+
+          :response ->
+            # Response flow path
+            Logger.debug("Conversation flow - Processing response signal")
+
+            case Handlers.response_handler(signal, state) do
+              {{:emit, new_signal}, new_state} ->
+                {:emit, new_signal, new_state}
+
+              {:skip, new_state} ->
+                {:skip, new_state}
+
+              other ->
+                Logger.warning("Unexpected response handler result: #{inspect(other)}")
+                {:skip, state}
+            end
+
+          :error ->
+            # Error flow path
+            Logger.debug("Conversation flow - Processing error signal")
+
+            case Handlers.error_handler(signal, state) do
+              {{:emit, new_signal}, new_state} ->
+                {:emit, new_signal, new_state}
+
+              {:skip, new_state} ->
+                {:skip, new_state}
+
+              other ->
+                Logger.warning("Unexpected error handler result: #{inspect(other)}")
+                {:skip, state}
+            end
+
+          _ ->
+            # Fallback for unknown signal types
+            Logger.warning("Conversation flow - Unknown signal type: #{inspect(signal.type)}")
+
+            fallback_signal =
+              Signals.response("Received unhandled signal type: #{inspect(signal.type)}")
+
+            {:emit, fallback_signal, state}
+        end
+
+      Logger.debug("Conversation flow - Result: #{inspect(result)}")
+      result
     end
 
     {flow, initial_state}
@@ -88,7 +212,7 @@ defmodule LLMAgent.Flows do
       iex> is_function(flow)
       true
   """
-  def task_flow(task_definition, options \\ []) do
+  def task_flow(task_definition, _options \\ []) do
     fn signal, state ->
       state_with_primitives = %{
         state: state,
@@ -290,8 +414,7 @@ defmodule LLMAgent.Flows do
     end
   end
 
-  # Private functions
-
+  # Register tools with the AgentForge system
   defp register_tools(tools) do
     Enum.each(tools, fn tool ->
       AgentForge.Tools.register(tool.name, fn args ->
@@ -304,32 +427,27 @@ defmodule LLMAgent.Flows do
     end)
   end
 
-  # Helper function to handle signals with a handler
-  defp handle_with({:halt, _} = result, _handler, _signal), do: result
+  # Create a flow that combines flows together in sequence
+  defp sequence_flows(flows) do
+    fn signal, state ->
+      Enum.reduce_while(flows, {signal, state}, fn flow, {current_signal, current_state} ->
+        case flow.(current_signal, current_state) do
+          {:emit, new_signal, new_state} ->
+            {:cont, {new_signal, new_state}}
 
-  defp handle_with({:skip, state}, handler, signal) do
-    case handler.(signal, state) do
-      {:skip, new_state} -> {:skip, new_state}
-      {:emit, new_signal} -> handle_with({:emit, new_signal}, handler, new_signal)
-      {:halt, result} -> {:halt, result}
-      {{:emit, new_signal}, new_state} -> {:emit, new_signal, new_state}
-      {{:skip, _}, new_state} -> {:skip, new_state}
-      {{:halt, result}, _} -> {:halt, result}
-    end
-  end
+          {:skip, new_state} ->
+            {:cont, {current_signal, new_state}}
 
-  defp handle_with({:emit, new_signal, state}, handler, _signal) do
-    handle_with({:skip, state}, handler, new_signal)
-  end
+          {:halt, result, new_state} ->
+            {:halt, {:halt, result, new_state}}
 
-  defp handle_with(state, handler, signal) when is_map(state) do
-    case handler.(signal, state) do
-      {:skip, new_state} -> {:skip, new_state}
-      {:emit, new_signal} -> {:emit, new_signal, state}
-      {:halt, result} -> {:halt, result}
-      {{:emit, new_signal}, new_state} -> {:emit, new_signal, new_state}
-      {{:skip, _}, new_state} -> {:skip, new_state}
-      {{:halt, result}, _} -> {:halt, result}
+          {:error, reason, new_state} ->
+            {:halt, {:error, reason, new_state}}
+
+          other ->
+            {:halt, other}
+        end
+      end)
     end
   end
 end

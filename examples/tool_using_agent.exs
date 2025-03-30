@@ -25,10 +25,11 @@ defmodule MockToolUsingProvider do
       |> Enum.find(fn msg -> msg["role"] == "user" end)
 
     question = last_message["content"]
+    question_lower = String.downcase(question)
 
     # Simulate LLM deciding whether to use tools
     cond do
-      String.contains?(String.downcase(question), ["calculate", "*", "+", "-", "/"]) ->
+      String.contains?(question_lower, ["calculate", "*", "+", "-", "/"]) ->
         # Simulate LLM deciding to use calculator
         expression = extract_math_expression(question)
 
@@ -51,7 +52,7 @@ defmodule MockToolUsingProvider do
            ]
          }}
 
-      String.contains?(String.downcase(question), ["time", "date"]) ->
+      String.contains?(question_lower, ["time", "date"]) ->
         # Simulate LLM deciding to use time tool
         format = if String.contains?(question, "ISO"), do: "iso8601", else: "utc"
 
@@ -215,11 +216,8 @@ defmodule LLMAgent.Examples.ToolDemo do
     Enum.each(questions, fn question ->
       IO.puts("\nQuestion: #{question}")
 
-      # Create user message signal
-      signal = Signals.user_message(question)
-
       # Process through the flow
-      case LLMAgent.process(flow, signal, state) do
+      case LLMAgent.process(flow, state, question) do
         {:ok, response, _new_state} ->
           # Display the response
           display_response(response)

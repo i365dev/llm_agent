@@ -13,22 +13,71 @@
 
 # First, let's define a mock LLM provider for testing
 defmodule MockElixirQAProvider do
-  @behaviour LLMAgent.Provider
+  require Logger
 
-  @impl true
   def generate_response(messages, _opts \\ []) do
-    # Get the last user message
-    last_message =
-      messages
-      |> Enum.reverse()
-      |> Enum.find(fn msg -> msg["role"] == "user" end)
+    # 调试消息格式
+    Logger.debug("MockElixirQAProvider - Messages: #{inspect(messages)}")
 
-    question = last_message["content"]
+    # 尝试多种可能的消息格式提取最后一条用户消息
+    last_message =
+      cond do
+        # 如果是带原子键的消息格式 %{role: "user", content: "..."}
+        Enum.any?(messages, fn msg -> is_map(msg) and Map.has_key?(msg, :role) end) ->
+          messages
+          |> Enum.reverse()
+          |> Enum.find(fn msg -> msg[:role] == "user" end)
+          |> case do
+            nil -> %{content: ""}
+            msg -> %{content: msg[:content] || ""}
+          end
+
+        # 如果是带字符串键的消息格式 %{"role" => "user", "content" => "..."}
+        Enum.any?(messages, fn msg -> is_map(msg) and Map.has_key?(msg, "role") end) ->
+          messages
+          |> Enum.reverse()
+          |> Enum.find(fn msg -> msg["role"] == "user" end)
+          |> case do
+            nil -> %{content: ""}
+            msg -> %{content: msg["content"] || ""}
+          end
+
+        # 如果是其他格式，尝试基本的字符串提取
+        true ->
+          last_user_message =
+            messages
+            |> Enum.reverse()
+            |> Enum.find(fn msg ->
+              is_binary(msg) or
+              (is_map(msg) and Map.values(msg) |> Enum.any?(fn v -> is_binary(v) and String.contains?(v, "?") end))
+            end)
+
+          case last_user_message do
+            msg when is_binary(msg) -> %{content: msg}
+            msg when is_map(msg) ->
+              content =
+                msg
+                |> Map.values()
+                |> Enum.find(fn v -> is_binary(v) end) || ""
+              %{content: content}
+            _ -> %{content: ""}
+          end
+      end
+
+    question = last_message[:content] || last_message["content"] || ""
+    question = if is_binary(question), do: question, else: ""
+    question_lower = String.downcase(question)
+
+    Logger.debug("MockElixirQAProvider - Extracted question: #{inspect(question)}")
+    Logger.debug("MockElixirQAProvider - question_lower: #{inspect(question_lower)}")
+    Logger.debug("MockElixirQAProvider - contains 'elixir': #{String.contains?(question_lower, "elixir")}")
+    Logger.debug("MockElixirQAProvider - contains 'what is': #{String.contains?(question_lower, "what is")}")
 
     # Simulate LLM response format
     response =
-      case String.downcase(question) do
-        q when String.contains?(q, "elixir") and String.contains?(q, "what is") ->
+      cond do
+        String.contains?(question_lower, "elixir") and String.contains?(question_lower, "what is") ->
+          Logger.debug("MockElixirQAProvider - Matched condition: 'what is elixir'")
           {:ok,
            %{
              "choices" => [
@@ -42,30 +91,49 @@ defmodule MockElixirQAProvider do
              ]
            }}
 
-        q when String.contains?(q, "process") ->
+        String.contains?(question_lower, "process") ->
+          Logger.debug("MockElixirQAProvider - Matched condition: 'process'")
           {:ok,
            %{
              "choices" => [
                %{
                  "message" => %{
                    "content" =>
-                     "Elixir processes are lightweight units of concurrency managed by the BEAM VM. They're isolated, communicate through message passing, and can be created in large numbers (millions) due to their efficiency. They're fundamental to Elixir's actor-based concurrency model.",
+                     "Processes in Elixir are lightweight, isolated units of execution that communicate through message passing. Unlike threads in other languages, Elixir processes are managed by the BEAM VM, not the operating system. Each process has its own memory heap, making them extremely lightweight (a few KB). This allows Elixir applications to run thousands or even millions of concurrent processes efficiently.",
                    "role" => "assistant"
                  }
                }
              ]
            }}
 
-        q when String.contains?(q, "error") ->
-          {:error, "Simulated LLM error for testing error handling"}
-
-        _ ->
+        String.contains?(question_lower, "pattern matching") ->
+          Logger.debug("MockElixirQAProvider - Matched condition: 'pattern matching'")
           {:ok,
            %{
              "choices" => [
                %{
                  "message" => %{
-                   "content" => "I'll explain this in the context of Elixir: #{question}",
+                   "content" =>
+                     "Pattern matching is a powerful feature in Elixir that allows you to match values, data structures, and even function returns against patterns. It's used extensively for destructuring data, control flow, and function clause selection. Pattern matching makes code more declarative and concise.\n\nFor example:\n\n```elixir\n# Matching values\n{a, b, c} = {1, 2, 3} # a=1, b=2, c=3\n\n# List pattern matching\n[head | tail] = [1, 2, 3] # head=1, tail=[2, 3]\n\n# Function clause selection\ndef process({:ok, value}), do: value\ndef process({:error, reason}), do: raise(reason)\n```",
+                   "role" => "assistant"
+                 }
+               }
+             ]
+           }}
+
+        String.contains?(question_lower, "error") ->
+          Logger.debug("MockElixirQAProvider - Matched condition: 'error'")
+          {:error, "Simulated error for testing purposes"}
+
+        true ->
+          Logger.debug("MockElixirQAProvider - No condition matched, using default response")
+          {:ok,
+           %{
+             "choices" => [
+               %{
+                 "message" => %{
+                   "content" =>
+                     "I don't have specific information about that. Is there something else about Elixir you'd like to know?",
                    "role" => "assistant"
                  }
                }
@@ -85,7 +153,7 @@ defmodule LLMAgent.Examples.SimpleQA do
   Shows proper error handling and conversation management.
   """
 
-  alias LLMAgent.{Flows, Signals, Store}
+  alias LLMAgent.{Flows, Store}
 
   def run do
     # 1. Configure LLMAgent to use our mock provider
@@ -103,7 +171,7 @@ defmodule LLMAgent.Examples.SimpleQA do
     """
 
     # 4. Create conversation flow
-    {flow, state} = Flows.qa_agent(system_prompt, store_name: store_name)
+    {flow, state} = Flows.qa_agent(system_prompt, store_name: store_name, provider: MockElixirQAProvider)
 
     IO.puts("\n=== Simple Question-Answering Agent Example ===\n")
     IO.puts("This example demonstrates:")
@@ -124,11 +192,8 @@ defmodule LLMAgent.Examples.SimpleQA do
     Enum.each(questions, fn question ->
       IO.puts("\nQuestion: #{question}")
 
-      # Create user message signal
-      signal = Signals.user_message(question)
-
       # Process the message through the flow
-      case LLMAgent.process(flow, signal, state) do
+      case LLMAgent.process(flow, state, question) do
         {:ok, response, _new_state} ->
           # Display the response
           display_response(response)
@@ -136,6 +201,14 @@ defmodule LLMAgent.Examples.SimpleQA do
         {:error, error, _state} ->
           # Display error
           IO.puts("Error: #{error}")
+
+        {:skip, _state} ->
+          # Handle skip result
+          IO.puts("Processing skipped for this message type")
+
+        unexpected ->
+          # Handle any other unexpected results
+          IO.puts("Unexpected result: #{inspect(unexpected)}")
       end
     end)
 

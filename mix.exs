@@ -46,7 +46,7 @@ defmodule LLMAgent.MixProject do
   # Run "mix help deps" to learn about dependencies
   defp deps do
     [
-      {:agent_forge, "~> 0.2.1"},
+      {:agent_forge, "~> 0.2.2"},
       {:jason, "~> 1.4"},
       {:openai, "~> 0.5.2"},
       {:anthropic, "~> 0.1.0"},

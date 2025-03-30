@@ -111,15 +111,15 @@ defmodule LLMAgent.Plugin do
   # Tool implementations
 
   @doc """
-  Calls an LLM service with the provided parameters.
+  Calls an LLM provider with the given parameters.
 
   ## Parameters
 
-  - `params` - A map with parameters for the LLM call:
-    - `provider` - The LLM provider (e.g., :openai, :anthropic)
-    - `messages` - The conversation history
-    - `tools` - Available tools
-    - `options` - Additional provider-specific options
+  - `params` - A map with parameters:
+    - `provider` - The LLM provider to use (e.g., :openai, a module)
+    - `messages` - The conversation messages
+    - `tools` - Available tools for the LLM
+    - `options` - Provider-specific options
 
   ## Returns
 
@@ -131,11 +131,29 @@ defmodule LLMAgent.Plugin do
     tools = Map.get(params, "tools", [])
     options = Map.get(params, "options", %{})
 
-    case provider do
-      :openai -> call_openai(messages, tools, options)
-      :anthropic -> call_anthropic(messages, tools, options)
-      :mock -> mock_llm_response(messages, tools, options)
-      _ -> %{error: "Unsupported provider: #{provider}"}
+    cond do
+      is_atom(provider) and Code.ensure_loaded?(provider) and
+          function_exported?(provider, :generate_response, 2) ->
+        try do
+          provider.generate_response(messages, Map.put(options, :tools, tools))
+        rescue
+          e ->
+            require Logger
+            Logger.error("Error calling module provider #{inspect(provider)}: #{inspect(e)}")
+            %{error: "Provider error: #{Exception.message(e)}"}
+        end
+
+      provider == :openai ->
+        call_openai(messages, tools, options)
+
+      provider == :anthropic ->
+        call_anthropic(messages, tools, options)
+
+      provider == :mock ->
+        mock_llm_response(messages, tools, options)
+
+      true ->
+        %{error: "Unsupported provider: #{inspect(provider)}"}
     end
   end
 
