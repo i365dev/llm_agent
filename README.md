@@ -214,9 +214,9 @@ end
 
 ## Examples
 
-- [Tool Using Agent](examples/tool_using_agent.exs)
-- [Simple QA Agent](examples/simple_qa_agent.exs)
-- [Investment Agent](examples/investment_portfolio.exs)
+- Simple conversation agent: [Simple QA Agent](examples/simple_qa_agent.exs)
+- Tool-using agent: [Tool Using Agent](examples/tool_using_agent.exs)
+- Complex domain-specific agent: [Investment Portfolio Advisor](examples/investment_portfolio.exs)
 
 ## Contributing
 
