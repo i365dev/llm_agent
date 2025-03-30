@@ -13,12 +13,7 @@
 
 # First, let's define a mock LLM provider for testing
 defmodule MockElixirQAProvider do
-  require Logger
-
   def generate_response(messages, _opts \\ []) do
-    # Debug message format
-    Logger.debug("MockElixirQAProvider - Messages: #{inspect(messages)}")
-
     # Extract the last user message from various possible message formats
     last_message =
       cond do
@@ -75,23 +70,10 @@ defmodule MockElixirQAProvider do
     question = if is_binary(question), do: question, else: ""
     question_lower = String.downcase(question)
 
-    Logger.debug("MockElixirQAProvider - Extracted question: #{inspect(question)}")
-    Logger.debug("MockElixirQAProvider - question_lower: #{inspect(question_lower)}")
-
-    Logger.debug(
-      "MockElixirQAProvider - contains 'elixir': #{String.contains?(question_lower, "elixir")}"
-    )
-
-    Logger.debug(
-      "MockElixirQAProvider - contains 'what is': #{String.contains?(question_lower, "what is")}"
-    )
-
     # Simulate LLM response format
     response =
       cond do
         String.contains?(question_lower, "elixir") and String.contains?(question_lower, "what is") ->
-          Logger.debug("MockElixirQAProvider - Matched condition: 'what is elixir'")
-
           {:ok,
            %{
              "choices" => [
@@ -106,8 +88,6 @@ defmodule MockElixirQAProvider do
            }}
 
         String.contains?(question_lower, "process") ->
-          Logger.debug("MockElixirQAProvider - Matched condition: 'process'")
-
           {:ok,
            %{
              "choices" => [
@@ -122,8 +102,6 @@ defmodule MockElixirQAProvider do
            }}
 
         String.contains?(question_lower, "pattern matching") ->
-          Logger.debug("MockElixirQAProvider - Matched condition: 'pattern matching'")
-
           {:ok,
            %{
              "choices" => [
@@ -138,12 +116,9 @@ defmodule MockElixirQAProvider do
            }}
 
         String.contains?(question_lower, "error") ->
-          Logger.debug("MockElixirQAProvider - Matched condition: 'error'")
           {:error, "Simulated error for testing purposes"}
 
         true ->
-          Logger.debug("MockElixirQAProvider - No condition matched, using default response")
-
           {:ok,
            %{
              "choices" => [
@@ -207,89 +182,69 @@ defmodule LLMAgent.Examples.SimpleQA do
     ]
 
     # Process each question
-    Enum.each(questions, fn question ->
+    state = Enum.reduce(questions, state, fn question, current_state ->
       IO.puts("\nQuestion: #{question}")
 
       # Process the message through the flow
-      case LLMAgent.process(flow, state, question) do
-        {:ok, response, _new_state} ->
-          # Display the response
-          display_response(response)
+      case LLMAgent.process(flow, current_state, question) do
+        {:ok, response, new_state} ->
+          # Display the agent's response
+          IO.puts("Assistant: #{response.data}")
+          # Return updated state for next iteration
+          new_state
 
-        {:error, error, _state} ->
-          # Display error
+        {:error, error, new_state} ->
           IO.puts("Error: #{error}")
-
-        {:skip, _state} ->
-          # Handle skip result
-          IO.puts("Processing skipped for this message type")
-
-        unexpected ->
-          # Handle any other unexpected results
-          IO.puts("Unexpected result: #{inspect(unexpected)}")
+          new_state
       end
     end)
 
-    # 6. Show conversation history from Store
-    IO.puts("\n=== Conversation History ===")
+    # 6. Display conversation history
     history = Store.get_llm_history(store_name)
 
+    IO.puts("\n=== Conversation History ===")
     Enum.each(history, fn message ->
-      case message do
-        %{role: "system"} ->
-          IO.puts("System: #{message.content}")
+      role = Map.get(message, "role") || Map.get(message, :role)
+      content = Map.get(message, "content") || Map.get(message, :content)
 
-        %{role: "user"} ->
-          IO.puts("\nHuman: #{message.content}")
+      case role do
+        "system" ->
+          IO.puts("System: #{content}")
+          IO.puts("")
 
-        %{role: "assistant"} ->
-          IO.puts("Assistant: #{message.content}")
+        "user" ->
+          IO.puts("H: #{content}")
+
+        "assistant" ->
+          IO.puts("Assistant: #{content}")
 
         _ ->
-          IO.puts("#{String.capitalize(message.role)}: #{message.content}")
+          IO.puts("#{role}: #{content}")
       end
     end)
 
-    IO.puts("\n=== Example Complete ===")
-
-    IO.puts("""
-
-    To use this in your own application:
-
-    1. Configure your LLM provider:
-       Application.put_env(:llm_agent, :provider, LLMAgent.Providers.OpenAI)
-       Application.put_env(:llm_agent, :api_key, System.get_env("OPENAI_API_KEY"))
-
-    2. Initialize store and create QA agent:
-       store_name = MyApp.ConversationStore
-       Store.start_link(name: store_name)
-       {flow, state} = LLMAgent.Flows.qa_agent(system_prompt, store_name: store_name)
-
-    3. Process messages:
-       {:ok, response} = LLMAgent.process(flow, Signals.user_message(question), state)
-
-    4. Handle responses:
-       case response do
-         %{type: :response} -> handle_response(response.data)
-         %{type: :error} -> handle_error(response.data)
-       end
-
-    5. Get conversation history:
-       history = LLMAgent.Store.get_llm_history(store_name)
-    """)
-  end
-
-  # Display different types of responses
-  defp display_response(%{type: :response} = signal) do
-    IO.puts("Assistant: #{signal.data}")
-  end
-
-  defp display_response(%{type: :error} = signal) do
-    IO.puts("Error: #{signal.data.message}")
-  end
-
-  defp display_response(other) do
-    IO.puts("Unexpected response: #{inspect(other)}")
+    IO.puts("\n=== Example Complete ===\n")
+    IO.puts("To use this in your own application:\n")
+    IO.puts("1. Configure your LLM provider:")
+    IO.puts("   Application.put_env(:llm_agent, :provider, LLMAgent.Providers.OpenAI)")
+    IO.puts("   Application.put_env(:llm_agent, :api_key, System.get_env(\"OPENAI_API_KEY\"))")
+    IO.puts("")
+    IO.puts("2. Initialize store and create QA agent:")
+    IO.puts("   store_name = MyApp.ConversationStore")
+    IO.puts("   Store.start_link(name: store_name)")
+    IO.puts("   {flow, state} = LLMAgent.Flows.qa_agent(system_prompt, store_name: store_name)")
+    IO.puts("")
+    IO.puts("3. Process messages:")
+    IO.puts("   {:ok, response} = LLMAgent.process(flow, question, state)")
+    IO.puts("")
+    IO.puts("4. Handle responses:")
+    IO.puts("   case response do")
+    IO.puts("     %{type: :response} -> handle_response(response.data)")
+    IO.puts("     %{type: :error} -> handle_error(response.data)")
+    IO.puts("   end")
+    IO.puts("")
+    IO.puts("5. Get conversation history:")
+    IO.puts("   history = LLMAgent.Store.get_llm_history(store_name)")
   end
 end
 
