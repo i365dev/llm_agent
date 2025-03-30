@@ -1,52 +1,76 @@
 # Investment Portfolio Agent Example
 #
 # This example demonstrates a sophisticated LLM-powered investment advisor agent.
-# It showcases multi-step analysis, tool chaining, and state management
-# for complex workflows.
+# It showcases dynamic workflow generation, tool chaining, and state management
+# for complex workflows that adapt to user requests and analysis results.
 #
 # Key concepts demonstrated:
-# 1. Complex tool interactions and chaining
-# 2. Multi-step workflows with state persistence
-# 3. Structured data handling
-# 4. Error recovery in financial operations
+# 1. Dynamic workflow generation based on evolving context
+# 2. Intelligent tool selection and sequencing
+# 3. Multi-branch decision paths based on data
+# 4. State management via Store interface
+# 5. Error recovery strategies
 #
 # Run with: mix run examples/investment_portfolio.exs
 
 defmodule MockInvestmentProvider do
+  @moduledoc """
+  Mock LLM provider that demonstrates dynamic workflow generation for investment analysis.
+
+  This provider simulates an LLM making intelligent decisions based on:
+  - Current portfolio state
+  - Historical analysis results
+  - Market conditions
+  - Client risk preferences
+  - Previous tool execution outcomes
+
+  Unlike static DAG workflows, it dynamically chooses the next steps based on 
+  the evolving context and state.
+  """
+
   @behaviour LLMAgent.Provider
+  require Logger
 
-  @impl true
+  @doc """
+  Generate a response based on the current conversation state.
+  Dynamically decides which tools to use based on previous tool results and user input.
+  """
   def generate_response(messages, _opts \\ []) do
-    # Get conversation history and last message
-    last_message =
-      messages
-      |> Enum.reverse()
-      |> Enum.find(fn msg -> msg["role"] == "user" end)
+    # 1. Extract key information from conversation history
+    last_user_message = get_last_user_message(messages)
+    tool_results = get_tool_results(messages)
 
-    # Get function results from history
-    function_results =
-      messages
-      |> Enum.filter(fn msg -> msg["role"] == "function" end)
-      |> Enum.map(fn msg -> {msg["name"], Jason.decode!(msg["content"])} end)
-      |> Map.new()
+    # 2. Determine conversation state and context
+    context = build_conversation_context(last_user_message, tool_results)
 
-    question = last_message["content"]
+    # 3. Log detailed analysis for debugging
+    Logger.debug("Analyzing conversation context: #{inspect(context)}")
 
-    # Simulate LLM analysis and tool selection
+    # 4. Make dynamic workflow decisions based on context
     cond do
-      # Initial portfolio creation flow
-      not Map.has_key?(function_results, "etf_screener") and should_create_portfolio?(question) ->
+      # INITIAL PORTFOLIO ANALYSIS PATH
+      # Start a new portfolio analysis if we haven't run the ETF screener yet
+      # and the user is asking about portfolio creation
+      context.is_new_portfolio_request and not context.has_etf_data ->
+        Logger.info("Starting new portfolio analysis workflow")
+
+        # Dynamic behavior: Choose initial analysis approach based on question content
         {:ok,
          %{
            "choices" => [
              %{
                "message" => %{
-                 "content" => "Let me analyze available ETFs for your portfolio.",
+                 "content" =>
+                   "I'll analyze available investment options for your #{context.risk_profile} risk profile.",
                  "tool_calls" => [
                    %{
                      "function" => %{
                        "name" => "etf_screener",
-                       "arguments" => Jason.encode!(%{})
+                       "arguments" =>
+                         Jason.encode!(%{
+                           "risk_level" => context.risk_level,
+                           "category" => determine_category(last_user_message)
+                         })
                      }
                    }
                  ]
@@ -55,10 +79,13 @@ defmodule MockInvestmentProvider do
            ]
          }}
 
-      # Portfolio construction after ETF screening
-      Map.has_key?(function_results, "etf_screener") and
-          not Map.has_key?(function_results, "portfolio_constructor") ->
-        risk_profile = determine_risk_profile(question)
+      # PORTFOLIO CONSTRUCTION PATH
+      # After ETF screening, create the portfolio if not done yet
+      context.has_etf_data and not context.has_portfolio ->
+        Logger.info("Proceeding to portfolio construction phase")
+
+        # Extract ETFs from screener results for portfolio construction
+        etfs = extract_etfs(context.screener_result)
 
         {:ok,
          %{
@@ -66,15 +93,15 @@ defmodule MockInvestmentProvider do
              %{
                "message" => %{
                  "content" =>
-                   "I've found suitable ETFs. Now let me construct a #{risk_profile} portfolio.",
+                   "Based on the available ETFs, I'll construct a #{context.risk_profile} portfolio for you.",
                  "tool_calls" => [
                    %{
                      "function" => %{
                        "name" => "portfolio_constructor",
                        "arguments" =>
                          Jason.encode!(%{
-                           "risk_profile" => risk_profile,
-                           "etfs" => extract_etfs(function_results["etf_screener"])
+                           "risk_profile" => context.risk_profile,
+                           "etfs" => etfs
                          })
                      }
                    }
@@ -84,10 +111,10 @@ defmodule MockInvestmentProvider do
            ]
          }}
 
-      # Backtest after portfolio construction
-      Map.has_key?(function_results, "portfolio_constructor") and
-          not Map.has_key?(function_results, "portfolio_backtester") ->
-        portfolio = function_results["portfolio_constructor"]
+      # PORTFOLIO EVALUATION PATH
+      # After constructing the portfolio, perform backtesting
+      context.has_portfolio and not context.has_backtest and should_backtest?(last_user_message) ->
+        Logger.info("Portfolio constructed, proceeding to backtesting")
 
         {:ok,
          %{
@@ -95,14 +122,15 @@ defmodule MockInvestmentProvider do
              %{
                "message" => %{
                  "content" =>
-                   "I'll run a backtest to evaluate this portfolio's historical performance.",
+                   "Let me evaluate how this portfolio would have performed historically.",
                  "tool_calls" => [
                    %{
                      "function" => %{
                        "name" => "portfolio_backtester",
                        "arguments" =>
                          Jason.encode!(%{
-                           "portfolio" => portfolio
+                           "portfolio" => context.portfolio,
+                           "years" => 10
                          })
                      }
                    }
@@ -112,28 +140,27 @@ defmodule MockInvestmentProvider do
            ]
          }}
 
-      # Portfolio optimization requests
-      Map.has_key?(function_results, "portfolio_constructor") and
-          risk_adjustment_requested?(question) ->
-        current_portfolio = function_results["portfolio_constructor"]
+      # OPTIMIZATION PATHS - Multiple potential branches based on context
+      # Dynamic branching based on risk adjustment requests
+      context.has_portfolio and context.risk_adjustment_requested ->
+        Logger.info("Risk adjustment requested, optimizing portfolio")
 
-        risk_preference =
-          if String.contains?(question, ["lower", "reduce", "safer"]), do: "Lower", else: "Higher"
+        # Determine optimization direction based on request
+        risk_preference = determine_risk_preference(last_user_message, context.risk_profile)
 
         {:ok,
          %{
            "choices" => [
              %{
                "message" => %{
-                 "content" =>
-                   "I'll adjust the portfolio for #{String.downcase(risk_preference)} risk.",
+                 "content" => "I'll adjust the portfolio to #{risk_preference} risk level.",
                  "tool_calls" => [
                    %{
                      "function" => %{
                        "name" => "portfolio_optimizer",
                        "arguments" =>
                          Jason.encode!(%{
-                           "portfolio" => current_portfolio,
+                           "portfolio" => context.portfolio,
                            "preferences" => %{
                              "risk_tolerance" => risk_preference
                            }
@@ -146,10 +173,16 @@ defmodule MockInvestmentProvider do
            ]
          }}
 
-      # Final analysis after getting all results
-      Map.has_key?(function_results, "portfolio_backtester") ->
-        portfolio = function_results["portfolio_constructor"]
-        backtest = function_results["portfolio_backtester"]
+      # PORTFOLIO ANALYSIS PATH
+      # When we have a complete portfolio with backtest and user wants analysis
+      context.has_portfolio and context.has_backtest and context.analysis_requested ->
+        Logger.info(
+          "Comprehensive analysis requested after portfolio construction and backtesting"
+        )
+
+        # Generate comprehensive analysis without additional tool calls
+        portfolio = context.portfolio
+        backtest = context.backtest
 
         {:ok,
          %{
@@ -162,18 +195,115 @@ defmodule MockInvestmentProvider do
            ]
          }}
 
-      String.contains?(question, "error") ->
-        {:error, "Simulated investment analysis error"}
+      # MARKET SCENARIO ANALYSIS PATH
+      # Simulate market conditions when requested
+      context.has_portfolio and context.market_scenario_requested ->
+        Logger.info("Market scenario analysis requested")
 
-      true ->
+        # Dynamically choose which simulation to run based on the request
+        scenario_type = determine_scenario_type(last_user_message)
+
         {:ok,
          %{
            "choices" => [
              %{
                "message" => %{
                  "content" =>
-                   "I need more information about your investment goals to assist you effectively.",
-                 "role" => "assistant"
+                   "I'll simulate how your portfolio might perform during a #{scenario_type} market.",
+                 "tool_calls" => [
+                   %{
+                     "function" => %{
+                       "name" => "market_simulator",
+                       "arguments" =>
+                         Jason.encode!(%{
+                           "portfolio" => context.portfolio,
+                           "scenario" => scenario_type
+                         })
+                     }
+                   }
+                 ]
+               }
+             }
+           ]
+         }}
+
+      # ERROR RECOVERY PATH
+      # When a previous tool has failed and we need to recover
+      context.has_error ->
+        Logger.info("Recovering from previous error: #{context.error_message}")
+
+        # Different recovery strategies based on which tool failed
+        case context.failed_tool do
+          "portfolio_constructor" ->
+            {:ok,
+             %{
+               "choices" => [
+                 %{
+                   "message" => %{
+                     "content" =>
+                       "I encountered an issue creating your portfolio. Let me try with a different approach.",
+                     "tool_calls" => [
+                       %{
+                         "function" => %{
+                           "name" => "portfolio_constructor",
+                           "arguments" =>
+                             Jason.encode!(%{
+                               "risk_profile" => context.risk_profile,
+                               # Simplified fallback
+                               "etfs" => ["VTI", "BND"],
+                               "fallback" => true
+                             })
+                         }
+                       }
+                     ]
+                   }
+                 }
+               ]
+             }}
+
+          "portfolio_backtester" ->
+            {:ok,
+             %{
+               "choices" => [
+                 %{
+                   "message" => %{
+                     "content" =>
+                       "I couldn't complete the detailed backtest. Let me provide a simplified analysis instead.",
+                     "content_only" => true
+                   }
+                 }
+               ]
+             }}
+
+          _ ->
+            {:ok,
+             %{
+               "choices" => [
+                 %{
+                   "message" => %{
+                     "content" =>
+                       "I encountered an issue in my analysis. Let me summarize what I know so far.",
+                     "content_only" => true
+                   }
+                 }
+               ]
+             }}
+        end
+
+      # DEFAULT INFORMATIONAL RESPONSE
+      # When no specific tool action is needed
+      true ->
+        Logger.info("Providing informational response")
+
+        # Generate a contextual response based on what we know
+        content = generate_contextual_response(context, last_user_message)
+
+        {:ok,
+         %{
+           "choices" => [
+             %{
+               "message" => %{
+                 "content" => content
                }
              }
            ]
@@ -181,56 +311,326 @@ defmodule MockInvestmentProvider do
     end
   end
 
-  # Helper functions for LLM decision simulation
-  defp should_create_portfolio?(question) do
-    question = String.downcase(question)
-    String.contains?(question, ["portfolio", "invest", "etf"])
-  end
+  #
+  # Context building functions
+  #
 
-  defp determine_risk_profile(question) do
-    question = String.downcase(question)
-
-    cond do
-      String.contains?(question, ["conservative", "safe", "low risk"]) -> "Conservative"
-      String.contains?(question, ["aggressive", "high risk", "growth"]) -> "Aggressive"
-      true -> "Moderate"
+  defp get_last_user_message(messages) do
+    messages
+    |> Enum.reverse()
+    |> Enum.find(fn msg ->
+      is_map(msg) and (msg["role"] == "user" or msg[:role] == "user")
+    end)
+    |> case do
+      nil -> ""
+      %{"content" => content} -> content
+      %{content: content} -> content
+      _ -> ""
     end
   end
 
-  defp risk_adjustment_requested?(question) do
-    question = String.downcase(question)
-
-    String.contains?(question, ["risk"]) and
-      String.contains?(question, ["lower", "higher", "reduce", "increase"])
+  defp get_tool_results(messages) do
+    messages
+    |> Enum.filter(fn msg ->
+      is_map(msg) and (msg["role"] == "function" or msg[:role] == "function")
+    end)
+    |> Enum.map(fn msg ->
+      name = msg["name"] || msg[:name]
+      content = msg["content"] || msg[:content]
+      {name, Jason.decode!(content)}
+    end)
+    |> Map.new()
   end
 
-  defp extract_etfs(screener_result) do
-    screener_result.etfs
-    |> Enum.map(& &1.ticker)
+  defp build_conversation_context(last_user_message, tool_results) do
+    # Extract key state information
+    question = String.downcase(last_user_message)
+
+    # Get results from different tools if available
+    screener_result = Map.get(tool_results, "etf_screener")
+    portfolio = Map.get(tool_results, "portfolio_constructor")
+    backtest = Map.get(tool_results, "portfolio_backtester")
+    optimized = Map.get(tool_results, "portfolio_optimizer")
+
+    # Detect the latest portfolio version
+    latest_portfolio = optimized || portfolio
+
+    # Identify conversation state
+    %{
+      # Data availability flags
+      has_etf_data: screener_result != nil,
+      has_portfolio: latest_portfolio != nil,
+      has_backtest: backtest != nil,
+      has_optimized: optimized != nil,
+
+      # Request classification
+      is_new_portfolio_request: is_new_portfolio_request?(question),
+      risk_adjustment_requested: is_risk_adjustment_request?(question),
+      analysis_requested: is_analysis_request?(question),
+      market_scenario_requested: is_market_scenario_request?(question),
+
+      # User preferences
+      risk_profile: determine_risk_profile(question, latest_portfolio),
+      risk_level: map_risk_profile_to_level(determine_risk_profile(question, latest_portfolio)),
+
+      # Tool results for reference
+      screener_result: screener_result,
+      portfolio: latest_portfolio,
+      backtest: backtest,
+
+      # Error handling
+      has_error: String.contains?(question, ["error", "fail", "issue", "problem"]),
+      error_message:
+        if(String.contains?(question, ["error", "fail", "issue", "problem"]),
+          do: last_user_message,
+          else: nil
+        ),
+      failed_tool:
+        if(String.contains?(question, "portfolio construction"),
+          do: "portfolio_constructor",
+          else: nil
+        )
+    }
+  end
+
+  #
+  # Decision and classification helper functions
+  #
+
+  defp is_new_portfolio_request?(question) do
+    question = String.downcase(question)
+
+    contains_keywords?(question, ["create", "build", "design", "new"]) and
+      contains_keywords?(question, ["portfolio", "investment", "etf", "fund"])
+  end
+
+  defp is_risk_adjustment_request?(question) do
+    question = String.downcase(question)
+
+    contains_keywords?(question, ["risk", "aggressive", "conservative"]) and
+      (contains_keywords?(question, [
+         "adjust",
+         "change",
+         "modify",
+         "increase",
+         "decrease",
+         "more",
+         "less"
+       ]) or
+         contains_keywords?(question, [
+           "too risky",
+           "too safe",
+           "too conservative",
+           "too aggressive"
+         ]))
+  end
+
+  defp is_analysis_request?(question) do
+    question = String.downcase(question)
+
+    contains_keywords?(question, [
+      "analyze",
+      "evaluate",
+      "show",
+      "explain",
+      "detail",
+      "tell me about"
+    ]) or
+      contains_keywords?(question, ["how would", "performance", "return", "history", "past"])
+  end
+
+  defp is_market_scenario_request?(question) do
+    question = String.downcase(question)
+
+    contains_keywords?(question, ["what if", "scenario", "crash", "bear", "bull", "recession"]) or
+      contains_keywords?(question, ["downturn", "simulation", "crisis", "boom"])
+  end
+
+  defp determine_risk_profile(question, portfolio \\ nil) do
+    # If we already have a portfolio, use its risk profile as default
+    default_profile = if portfolio, do: portfolio["risk_profile"], else: "Moderate"
+
+    question = String.downcase(question)
+
+    cond do
+      contains_keywords?(question, ["conservative", "safe", "low risk", "cautious", "risk averse"]) ->
+        "Conservative"
+
+      contains_keywords?(question, ["aggressive", "high risk", "growth", "high return", "risky"]) ->
+        "Aggressive"
+
+      contains_keywords?(question, ["balanced", "moderate", "middle"]) ->
+        "Moderate"
+
+      true ->
+        default_profile
+    end
+  end
+
+  defp map_risk_profile_to_level(risk_profile) do
+    case risk_profile do
+      "Conservative" -> "Low"
+      "Moderate" -> "Moderate"
+      "Aggressive" -> "High"
+      _ -> "Moderate"
+    end
+  end
+
+  defp determine_risk_preference(question, current_profile) do
+    question = String.downcase(question)
+
+    cond do
+      contains_keywords?(question, [
+        "safer",
+        "lower risk",
+        "less risk",
+        "conservative",
+        "too risky",
+        "too aggressive"
+      ]) ->
+        "Lower"
+
+      contains_keywords?(question, [
+        "more risk",
+        "higher risk",
+        "aggressive",
+        "growth",
+        "too safe",
+        "too conservative"
+      ]) ->
+        "Higher"
+
+      true ->
+        "Same"
+    end
+  end
+
+  defp determine_category(question) do
+    question = String.downcase(question)
+
+    cond do
+      contains_keywords?(question, ["tech", "technology", "innovation"]) -> "Technology"
+      contains_keywords?(question, ["income", "dividend", "yield"]) -> "Income"
+      contains_keywords?(question, ["global", "international", "worldwide"]) -> "International"
+      contains_keywords?(question, ["esg", "sustainable", "green", "social"]) -> "ESG"
+      true -> "Broad Market"
+    end
+  end
+
+  defp determine_scenario_type(question) do
+    question = String.downcase(question)
+
+    cond do
+      contains_keywords?(question, ["crash", "recession", "bear", "crisis", "down"]) ->
+        "Bear Market"
+
+      contains_keywords?(question, ["boom", "bull", "growth", "up", "recovery"]) ->
+        "Bull Market"
+
+      contains_keywords?(question, ["inflation", "rising rates", "interest"]) ->
+        "High Inflation"
+
+      contains_keywords?(question, ["volatility", "uncertainty"]) ->
+        "High Volatility"
+
+      # Default to stress test
+      true ->
+        "Bear Market"
+    end
+  end
+
+  #
+  # Response generation functions
+  #
+
+  defp generate_contextual_response(context, question) do
+    cond do
+      context.has_portfolio and context.has_backtest ->
+        portfolio = context.portfolio
+        backtest = context.backtest
+
+        "Based on our analysis, your #{String.downcase(portfolio["risk_profile"])} portfolio " <>
+          "has an expected return of #{Float.round(portfolio["expected_return"], 2)}%. " <>
+          "The historical analysis shows a compound annual growth rate of #{Float.round(backtest["cagr"], 2)}% " <>
+          "with a maximum drawdown of #{Float.round(backtest["max_drawdown"], 2)}%. " <>
+          "Would you like me to adjust the risk level or analyze specific market scenarios?"
+
+      context.has_portfolio ->
+        portfolio = context.portfolio
+
+        "I've created a #{String.downcase(portfolio["risk_profile"])} risk portfolio " <>
+          "with an expected return of #{Float.round(portfolio["expected_return"], 2)}%. " <>
+          "The portfolio consists of #{length(portfolio["allocations"])} ETFs. " <>
+          "Would you like me to run a historical performance analysis on this portfolio?"
+
+      context.has_etf_data ->
+        screener = context.screener_result
+
+        "I've found #{screener["count"]} ETFs that match your criteria. " <>
+          "Would you like me to construct a portfolio using these funds?"
+
+      true ->
+        "I can help you create and analyze an investment portfolio. " <>
+          "Would you like me to recommend a portfolio based on your risk preference?"
+    end
   end
 
   defp generate_portfolio_analysis(portfolio, backtest) do
     """
-    Based on my analysis, I've created a #{String.downcase(portfolio.risk_profile)} risk portfolio with an expected annual return of #{Float.round(portfolio.expected_return, 2)}%.
+    I've completed a comprehensive analysis of your #{String.downcase(portfolio["risk_profile"])} risk portfolio.
 
-    Portfolio Allocation:
-    #{format_allocations(portfolio.allocations)}
+    Portfolio Composition:
+    #{format_allocations(portfolio["allocations"])}
 
-    Backtest Results (#{backtest.years} years):
-    - Initial investment: $#{Float.round(backtest.initial_investment, 2)}
-    - Final value: $#{Float.round(backtest.final_value, 2)}
-    - CAGR: #{Float.round(backtest.cagr, 2)}%
-    - Sharpe ratio: #{Float.round(backtest.sharpe_ratio, 2)}
-    - Maximum drawdown: #{Float.round(backtest.max_drawdown, 2)}%
+    Expected Annual Return: #{Float.round(portfolio["expected_return"], 2)}%
 
-    Would you like me to adjust the portfolio's risk level or make any other changes?
+    Historical Performance (#{backtest["years"]} years):
+    - Compound Annual Growth Rate (CAGR): #{Float.round(backtest["cagr"], 2)}%
+    - Risk-adjusted Return (Sharpe Ratio): #{Float.round(backtest["sharpe_ratio"], 2)}
+    - Maximum Drawdown: #{Float.round(backtest["max_drawdown"], 2)}%
+
+    This portfolio offers a balance of #{cond do
+      portfolio["risk_profile"] == "Conservative" -> "capital preservation and modest income"
+      portfolio["risk_profile"] == "Aggressive" -> "growth potential with higher volatility"
+      true -> "growth and stability"
+    end}.
+
+    Would you like me to adjust the risk level or test how this portfolio might perform in specific market scenarios?
     """
+  end
+
+  #
+  # Utility functions
+  #
+
+  defp contains_keywords?(text, keywords) do
+    Enum.any?(keywords, &String.contains?(text, &1))
+  end
+
+  defp extract_etfs(screener_result) do
+    Enum.map(screener_result["etfs"], & &1["ticker"])
   end
 
   defp format_allocations(allocations) do
     allocations
-    |> Enum.map(fn alloc -> "- #{alloc.ticker}: #{Float.round(alloc.allocation * 100, 1)}%" end)
+    |> Enum.map(fn alloc ->
+      "- #{alloc["ticker"]}: #{Float.round(alloc["allocation"] * 100, 1)}%"
+    end)
     |> Enum.join("\n")
+  end
+
+  defp should_backtest?(question) do
+    question = String.downcase(question)
+
+    contains_keywords?(question, [
+      "perform",
+      "history",
+      "backtest",
+      "historical",
+      "show me",
+      "analysis"
+    ]) or
+      contains_keywords?(question, ["how would", "how has", "past", "over time"])
   end
 end
 
@@ -312,19 +712,37 @@ defmodule LLMAgent.Examples.InvestmentTools do
           "required" => ["portfolio", "preferences"]
         },
         execute: &optimize_portfolio/1
+      },
+      %{
+        name: "market_simulator",
+        description: "Simulate portfolio performance in different market scenarios",
+        parameters: %{
+          "type" => "object",
+          "properties" => %{
+            "portfolio" => %{
+              "type" => "object"
+            },
+            "scenario" => %{
+              "type" => "string",
+              "enum" => ["Bear Market", "Bull Market", "High Inflation", "High Volatility"]
+            }
+          },
+          "required" => ["portfolio", "scenario"]
+        },
+        execute: &simulate_market_scenario/1
       }
     ]
   end
 
   # Tool implementation functions
-  def screen_etfs(_criteria) do
+  def screen_etfs(%{"risk_level" => risk_level, "category" => category}) do
     # Mock ETF data
-    etfs = [
+    all_etfs = [
       %{
         ticker: "VTI",
         name: "Vanguard Total Stock Market ETF",
         expense_ratio: 0.03,
-        category: "US Equity",
+        category: "Broad Market",
         risk_level: "Moderate",
         avg_return: 10.2
       },
@@ -340,11 +758,44 @@ defmodule LLMAgent.Examples.InvestmentTools do
         ticker: "VEA",
         name: "Vanguard FTSE Developed Markets ETF",
         expense_ratio: 0.05,
-        category: "International Equity",
+        category: "International",
         risk_level: "Moderate-High",
         avg_return: 8.1
+      },
+      %{
+        ticker: "VGT",
+        name: "Vanguard Information Technology ETF",
+        expense_ratio: 0.10,
+        category: "Technology",
+        risk_level: "High",
+        avg_return: 15.3
+      },
+      %{
+        ticker: "SCHD",
+        name: "Schwab US Dividend Equity ETF",
+        expense_ratio: 0.06,
+        category: "Income",
+        risk_level: "Moderate",
+        avg_return: 9.2
+      },
+      %{
+        ticker: "ESGV",
+        name: "Vanguard ESG U.S. Stock ETF",
+        expense_ratio: 0.09,
+        category: "ESG",
+        risk_level: "Moderate",
+        avg_return: 9.8
       }
     ]
+
+    # Filter based on criteria
+    etfs =
+      all_etfs
+      |> Enum.filter(fn etf ->
+        (category == "Broad Market" or etf.category == category) and
+          (risk_level == "Moderate" or etf.risk_level == risk_level or
+             String.contains?(etf.risk_level, risk_level))
+      end)
 
     %{
       etfs: etfs,
@@ -352,24 +803,48 @@ defmodule LLMAgent.Examples.InvestmentTools do
     }
   end
 
-  def create_portfolio(%{"risk_profile" => risk_profile}) do
+  def create_portfolio(%{"risk_profile" => risk_profile} = params) do
+    # Check if we're in fallback mode (error recovery)
+    fallback = Map.get(params, "fallback", false)
+
+    # Use ETFs provided in request or default set
+    provided_etfs = Map.get(params, "etfs", nil)
+
     allocations =
-      case risk_profile do
-        "Conservative" ->
+      case {risk_profile, fallback} do
+        {"Conservative", true} ->
+          [
+            %{ticker: "BND", allocation: 0.8},
+            %{ticker: "VTI", allocation: 0.2}
+          ]
+
+        {"Conservative", false} ->
           [
             %{ticker: "BND", allocation: 0.6},
             %{ticker: "VTI", allocation: 0.3},
             %{ticker: "VEA", allocation: 0.1}
           ]
 
-        "Moderate" ->
+        {"Moderate", true} ->
+          [
+            %{ticker: "VTI", allocation: 0.5},
+            %{ticker: "BND", allocation: 0.5}
+          ]
+
+        {"Moderate", false} ->
           [
             %{ticker: "VTI", allocation: 0.6},
             %{ticker: "BND", allocation: 0.3},
             %{ticker: "VEA", allocation: 0.1}
           ]
 
-        "Aggressive" ->
+        {"Aggressive", true} ->
+          [
+            %{ticker: "VTI", allocation: 0.9},
+            %{ticker: "BND", allocation: 0.1}
+          ]
+
+        {"Aggressive", false} ->
           [
             %{ticker: "VTI", allocation: 0.7},
             %{ticker: "VEA", allocation: 0.2},
@@ -386,24 +861,40 @@ defmodule LLMAgent.Examples.InvestmentTools do
     }
   end
 
-  def backtest_portfolio(%{"portfolio" => portfolio}) do
-    # Mock backtest results
+  def backtest_portfolio(%{"portfolio" => portfolio, "years" => years}) do
+    # Mock backtest results based on portfolio risk profile
+    years = years || 10
+
+    # Adjust based on risk profile
+    {cagr, max_drawdown, sharpe_ratio} =
+      case portfolio["risk_profile"] do
+        "Conservative" -> {5.2, 10.0, 0.65}
+        "Moderate" -> {8.2, 20.0, 0.75}
+        "Aggressive" -> {11.5, 35.0, 0.82}
+        _ -> {8.2, 20.0, 0.75}
+      end
+
     %{
-      years: 10,
+      years: years,
       initial_investment: 100.0,
-      final_value: 220.0,
-      cagr: 8.2,
-      max_drawdown: 15.0,
-      sharpe_ratio: 0.75,
-      risk_adjusted_return: 75.0
+      final_value: calculate_final_value(100.0, cagr, years),
+      cagr: cagr,
+      max_drawdown: max_drawdown,
+      sharpe_ratio: sharpe_ratio,
+      risk_adjusted_return: sharpe_ratio * 100.0
     }
+  end
+
+  def backtest_portfolio(%{"portfolio" => portfolio}) do
+    # Default to 10 years when not specified
+    backtest_portfolio(%{"portfolio" => portfolio, "years" => 10})
   end
 
   def optimize_portfolio(%{
         "portfolio" => portfolio,
         "preferences" => %{"risk_tolerance" => risk_tolerance}
       }) do
-    current_profile = portfolio.risk_profile
+    current_profile = portfolio["risk_profile"]
 
     new_profile =
       case {current_profile, risk_tolerance} do
@@ -417,49 +908,136 @@ defmodule LLMAgent.Examples.InvestmentTools do
     create_portfolio(%{"risk_profile" => new_profile})
   end
 
+  def simulate_market_scenario(%{"portfolio" => portfolio, "scenario" => scenario}) do
+    base_return = portfolio["expected_return"]
+
+    # Simulate different market scenarios
+    {return_impact, volatility_impact, max_drawdown} =
+      case scenario do
+        "Bear Market" -> {-0.25, 1.5, 0.35}
+        "Bull Market" -> {0.15, 0.8, 0.12}
+        "High Inflation" -> {-0.1, 1.2, 0.18}
+        "High Volatility" -> {0.0, 2.0, 0.25}
+        _ -> {0.0, 1.0, 0.15}
+      end
+
+    # Calculate scenario performance
+    scenario_return = base_return * (1 + return_impact)
+
+    %{
+      scenario: scenario,
+      expected_return: scenario_return,
+      volatility_multiplier: volatility_impact,
+      max_drawdown: max_drawdown * 100,
+      summary: generate_scenario_summary(scenario, scenario_return, portfolio["risk_profile"])
+    }
+  end
+
   # Helper functions
   defp calculate_expected_return(allocations) do
     returns = %{
       "VTI" => 10.2,
       "BND" => 3.8,
-      "VEA" => 8.1
+      "VEA" => 8.1,
+      "VGT" => 15.3,
+      "SCHD" => 9.2,
+      "ESGV" => 9.8
     }
 
     Enum.reduce(allocations, 0, fn alloc, acc ->
-      acc + returns[alloc.ticker] * alloc.allocation
+      # Default if ticker unknown
+      ticker_return = Map.get(returns, alloc.ticker, 7.0)
+      acc + ticker_return * alloc.allocation
     end)
+  end
+
+  defp calculate_final_value(initial, cagr, years) do
+    initial * :math.pow(1 + cagr / 100, years)
+  end
+
+  defp generate_scenario_summary(scenario, return, risk_profile) do
+    case scenario do
+      "Bear Market" ->
+        "In a bear market, your #{String.downcase(risk_profile)} portfolio would be expected " <>
+          "to lose value, with returns dropping to around #{Float.round(return, 1)}%. " <>
+          "#{if risk_profile == "Conservative",
+            do: "The higher bond allocation would provide some protection.",
+            else: "The equity-heavy allocation would result in significant drawdowns."}"
+
+      "Bull Market" ->
+        "In a bull market, your #{String.downcase(risk_profile)} portfolio would likely " <>
+          "perform well, with returns potentially reaching #{Float.round(return, 1)}%. " <>
+          "#{if risk_profile == "Aggressive",
+            do: "The higher equity allocation would capture most of the upside.",
+            else: "The conservative allocation would limit some of the potential gains."}"
+
+      "High Inflation" ->
+        "During high inflation, your #{String.downcase(risk_profile)} portfolio would face challenges, " <>
+          "with real returns potentially dropping to #{Float.round(return, 1)}%. " <>
+          "#{if risk_profile == "Conservative",
+            do: "Bond values may be particularly affected by rising rates.",
+            else: "Equities may provide some inflation protection over the long term."}"
+
+      "High Volatility" ->
+        "In a highly volatile market, your #{String.downcase(risk_profile)} portfolio would experience " <>
+          "significant price swings, though long-term returns might still average #{Float.round(return, 1)}%. " <>
+          "#{if risk_profile == "Conservative",
+            do: "The higher bond allocation would dampen some volatility.",
+            else: "The equity-heavy allocation would result in dramatic price movements."}"
+
+      _ ->
+        "Under this scenario, your portfolio's expected return would be approximately #{Float.round(return, 1)}%."
+    end
   end
 end
 
 defmodule LLMAgent.Examples.InvestmentDemo do
   @moduledoc """
   Demonstrates a sophisticated investment portfolio advisor built with LLMAgent.
+  This example showcases dynamic workflow generation based on client needs,
+  complex tool chaining, state management, and error recovery.
   """
 
-  alias AgentForge.Flow
-  alias LLMAgent.{Flows, Signals, Store}
+  alias AgentForge.{Flow, Store}
+  alias LLMAgent.{Flows, Signals}
+
+  require Logger
 
   def run do
     # 1. Configure LLMAgent to use our mock provider
     Application.put_env(:llm_agent, :provider, MockInvestmentProvider)
 
-    # 2. Create store for this example
+    # 2. Create store for this example with unique name
     store_name = :"investment_advisor_store_#{System.unique_integer([:positive])}"
-    _store = Store.start_link(name: store_name)
+    {:ok, _store_pid} = LLMAgent.Store.start_link(name: store_name)
 
-    # 3. Create system prompt for investment advisor
+    # 3. Store initial state using the Store interface
+    Store.put(store_name, :market_volatility, "Normal")
+    Store.put(store_name, :interest_rate_trend, "Stable")
+    Store.put(store_name, :economic_outlook, "Mixed")
+    Store.put(store_name, :analysis_depth, "Comprehensive")
+
+    # 4. Create system prompt for investment advisor
     system_prompt = """
     You are an investment advisor specializing in ETF portfolios.
-    Follow these steps when creating portfolios:
-    1. Screen available ETFs using etf_screener
-    2. Create a portfolio with portfolio_constructor
-    3. Evaluate performance with portfolio_backtester
-    4. Optimize if needed with portfolio_optimizer
 
-    Be thorough in your analysis and explain your recommendations clearly.
+    Follow a dynamic analysis approach based on client needs:
+    1. Screen ETFs based on client preferences and market conditions
+    2. Construct a portfolio aligned with risk profile and goals
+    3. Analyze historical performance using backtesting
+    4. Optimize the portfolio based on client feedback
+    5. Simulate performance in different market scenarios
+
+    When providing recommendations, consider:
+    - Current market conditions: #{Store.get(store_name, :market_volatility)}
+    - Interest rate environment: #{Store.get(store_name, :interest_rate_trend)}
+    - Economic outlook: #{Store.get(store_name, :economic_outlook)}
+
+    Tailor your analysis approach to the client's knowledge level and goals.
+    Present your findings clearly with both technical detail and plain language explanations.
     """
 
-    # 4. Create conversation flow with investment tools
+    # 5. Create conversation flow with investment tools
     {flow, state} =
       Flows.tool_agent(
         system_prompt,
@@ -467,23 +1045,58 @@ defmodule LLMAgent.Examples.InvestmentDemo do
         store_name: store_name
       )
 
+    # 6. Demo intro
     IO.puts("\n=== Investment Portfolio Advisor Example ===\n")
     IO.puts("This example demonstrates:")
-    IO.puts("- Advanced tool chaining")
-    IO.puts("- Multi-step analysis")
-    IO.puts("- Portfolio optimization\n")
+    IO.puts("- Dynamic workflow generation based on client input")
+    IO.puts("- Multi-step analysis with state tracking")
+    IO.puts("- Conditional tool selection")
+    IO.puts("- Error recovery and alternate path execution")
+    IO.puts("- Context-aware responses\n")
 
-    # 5. Process example conversation
-    sample_conversation = [
-      "Create a retirement portfolio for me. I prefer moderate risk.",
-      "Can you make it a bit more conservative? I'm worried about market volatility.",
-      "Show me how this portfolio has performed historically.",
-      "What's the expected return on this portfolio?"
+    # 7. Process dynamic conversation scenarios
+    sample_conversations = [
+      # Scenario 1: Standard Portfolio Creation
+      [
+        "I'd like to create a retirement portfolio. I prefer moderate risk investments.",
+        "Can you make it a bit more conservative? I'm worried about market volatility.",
+        "Show me how this portfolio has performed historically."
+      ],
+
+      # Scenario 2: Specialized Portfolio with Market Scenarios
+      [
+        "I need a technology-focused aggressive portfolio for growth.",
+        "What would happen to this portfolio during a market crash?",
+        "Let's adjust it to be more balanced while maintaining tech exposure."
+      ],
+
+      # Scenario 3: Income Portfolio with Error Recovery
+      [
+        "I want a portfolio focused on dividend income for retirement.",
+        # This will trigger error recovery path
+        "error in portfolio construction",
+        "What's the expected yield on this portfolio?"
+      ]
     ]
 
-    # Process each interaction while maintaining state
-    state =
-      Enum.reduce(sample_conversation, state, fn input, current_state ->
+    # Run each conversation scenario with a fresh state
+    Enum.with_index(sample_conversations, 1)
+    |> Enum.each(fn {conversation, index} ->
+      # Reset store between scenarios
+      reset_store(store_name)
+
+      # Create new state for each conversation
+      {_flow, fresh_state} =
+        Flows.tool_agent(
+          system_prompt,
+          LLMAgent.Examples.InvestmentTools.get_tools(),
+          store_name: store_name
+        )
+
+      IO.puts("\n\n=== Scenario #{index} ===\n")
+
+      # Process each interaction in the conversation
+      Enum.reduce(conversation, fresh_state, fn input, current_state ->
         IO.puts("\nClient: #{input}")
 
         # Create user message signal
@@ -493,45 +1106,62 @@ defmodule LLMAgent.Examples.InvestmentDemo do
         case Flow.process(flow, signal, current_state) do
           {result, new_state} ->
             display_response(result)
+
+            # Store conversation progress in the store for stateful decisions
+            Store.put(store_name, :last_client_message, input)
+            store_result_data(store_name, result)
+
             new_state
 
           {:error, error} ->
             IO.puts("Error: #{error}")
+
+            # Store error for recovery paths
+            Store.put(store_name, :last_error, error)
+
             current_state
         end
       end)
-
-    # 6. Show analysis history
-    IO.puts("\n=== Investment Analysis Process ===")
-    history = Store.get_llm_history(store_name)
-
-    Enum.each(history, fn message ->
-      case message do
-        %{role: "system"} ->
-          IO.puts("\nAdvisor System: #{message.content}")
-
-        %{role: "user"} ->
-          IO.puts("\nClient: #{message.content}")
-
-        %{role: "assistant"} ->
-          IO.puts("Advisor: #{message.content}")
-
-        %{role: "function", name: name} ->
-          IO.puts("\nAnalysis (#{name}):")
-          IO.puts(format_tool_result(name, message.content))
-
-        _ ->
-          IO.puts("#{String.capitalize(message.role)}: #{message.content}")
-      end
     end)
 
-    IO.puts("\n=== Example Complete ===")
+    # 8. Demo conclusion with architectural insights
+    IO.puts("\n=== Investment Agent Architecture ===")
 
     IO.puts("""
 
-    To use this in your own application:
+    This example demonstrates how LLMAgent builds dynamic workflows:
 
-    1. Define your investment tools:
+    1. Signal-Based Decision Making:
+       The agent doesn't follow a predefined DAG, but instead makes decisions 
+       based on evolving context and conversation state.
+
+    2. Tool Chaining with LLM Intelligence:
+       Unlike rule-based systems, the agent intelligently chains tools based on:
+       - Results of previous tool executions
+       - Client request analysis
+       - Contextual state information
+       
+    3. Dynamic Path Selection:
+       The agent dynamically determines:
+       - Which tool to use next
+       - When to terminate tool chains
+       - How to recover from errors
+       - When to branch into alternative analysis paths
+
+    4. State Management:
+       The Store component maintains state across interactions:
+       - #{inspect(Store.get_all(store_name) |> Enum.count())} state keys tracked
+       - Analysis history preserved
+       - Tool results maintained for context
+    """)
+
+    IO.puts("\n=== Example Complete ===")
+    IO.puts("\nTo implement similar agents in your application, follow this pattern:")
+
+    IO.puts("""
+
+    1. Define domain-specific tools:
+       ```elixir
        tools = [
          %{
            name: "etf_screener",
@@ -540,26 +1170,84 @@ defmodule LLMAgent.Examples.InvestmentDemo do
            execute: &screen_etfs/1
          }
        ]
-
-    2. Initialize store and create investment advisor:
+       ```
+       
+    2. Initialize store and create the agent:
+       ```elixir
        store_name = MyApp.InvestmentStore
-       Store.start_link(name: store_name)
+       {:ok, _} = LLMAgent.Store.start_link(name: store_name)
        {flow, state} = LLMAgent.Flows.tool_agent(system_prompt, tools, store_name: store_name)
-
+       ```
+       
     3. Process client requests:
+       ```elixir
        {result, new_state} = AgentForge.Flow.process(flow, Signals.user_message(request), state)
-
-    4. Handle responses:
-       case result do
-         {:emit, response} -> process_emit(response)
-         {:halt, response} -> process_halt(response)
-         {:skip, _} -> process_skip()
-       end
-
-    5. Get analysis history:
+       ```
+       
+    4. Access stateful information:
+       ```elixir
+       portfolio = AgentForge.Store.get(store_name, :current_portfolio)
        history = LLMAgent.Store.get_llm_history(store_name)
+       ```
     """)
   end
+
+  # Helper functions for demo
+
+  # Reset store between scenarios
+  defp reset_store(store_name) do
+    # Preserve system settings but clear scenario-specific data
+    preserved_keys = [
+      :market_volatility,
+      :interest_rate_trend,
+      :economic_outlook,
+      :analysis_depth
+    ]
+
+    # Save values we want to keep
+    preserved_values =
+      preserved_keys
+      |> Enum.map(fn key -> {key, Store.get(store_name, key)} end)
+      |> Map.new()
+
+    # Clear everything
+    Store.clear(store_name)
+
+    # Restore preserved values
+    Enum.each(preserved_values, fn {key, value} ->
+      Store.put(store_name, key, value)
+    end)
+  end
+
+  # Store result data for stateful decisions
+  defp store_result_data(store_name, {:emit, %{type: :tool_result} = signal}) do
+    tool_name = signal.data.name
+    result = signal.data.result
+
+    # Store specific data based on tool type
+    case tool_name do
+      "portfolio_constructor" ->
+        Store.put(store_name, :current_portfolio, result)
+        Store.put(store_name, :risk_profile, result["risk_profile"])
+
+      "portfolio_backtester" ->
+        Store.put(store_name, :backtest_results, result)
+
+      "portfolio_optimizer" ->
+        Store.put(store_name, :current_portfolio, result)
+        Store.put(store_name, :risk_profile, result["risk_profile"])
+
+      "market_simulator" ->
+        Store.put(store_name, :market_scenarios, [
+          result | Store.get(store_name, :market_scenarios) || []
+        ])
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp store_result_data(_store_name, _result), do: :ok
 
   # Display different types of responses
   defp display_response({:emit, %{type: :response} = signal}),
@@ -606,9 +1294,23 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
     """
     Backtest results (#{result["years"]} years):
+    - Initial $100 grew to $#{Float.round(result["final_value"], 2)}
     - CAGR: #{Float.round(result["cagr"], 2)}%
     - Sharpe ratio: #{Float.round(result["sharpe_ratio"], 2)}
     - Max drawdown: #{Float.round(result["max_drawdown"], 2)}%
+    """
+  end
+
+  defp format_tool_result("market_simulator", result) do
+    result = Jason.decode!(result)
+
+    """
+    #{result["scenario"]} scenario:
+    - Expected return: #{Float.round(result["expected_return"], 2)}%
+    - Volatility: #{if result["volatility_multiplier"] > 1, do: "Increased", else: "Decreased"} (#{result["volatility_multiplier"]}x)
+    - Maximum drawdown: #{Float.round(result["max_drawdown"], 1)}%
+
+    #{result["summary"]}
     """
   end
 
