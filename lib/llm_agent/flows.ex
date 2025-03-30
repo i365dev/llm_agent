@@ -8,7 +8,7 @@ defmodule LLMAgent.Flows do
   """
 
   alias AgentForge
-  alias LLMAgent.{Handlers, Signals}
+  alias LLMAgent.{Handlers, Signals, Store}
 
   @doc """
   Creates a standard conversation flow with the given system prompt and tools.
@@ -30,14 +30,13 @@ defmodule LLMAgent.Flows do
       true
   """
   def conversation(system_prompt, tools \\ [], options \\ []) do
-    # Create initial state with system prompt in history
+    # Create initial state with configuration only
     initial_state = %{
-      history: [%{role: "system", content: system_prompt}],
       available_tools: tools,
-      thoughts: [],
-      tool_calls: [],
-      current_tasks: [],
-      preferences: %{}
+      provider: Keyword.get(options, :provider, :openai),
+      tool_registry: Keyword.get(options, :tool_registry, &AgentForge.Tools.get/1),
+      llm_options: Keyword.get(options, :llm_options, %{}),
+      response_formatter: Keyword.get(options, :response_formatter)
     }
 
     # Add any custom options to state
@@ -45,6 +44,11 @@ defmodule LLMAgent.Flows do
 
     # Register tools with the system
     register_tools(tools)
+
+    # Initialize store and add system prompt
+    store_name = Keyword.get(options, :store_name, LLMAgent.Store)
+    Store.new(%{}, name: store_name)
+    Store.add_message(store_name, "system", system_prompt)
 
     # Create flow with standard handlers
     flow = fn signal, state ->

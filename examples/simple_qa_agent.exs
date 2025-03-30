@@ -1,123 +1,194 @@
-# A simple question-answering agent example
+# Simple Question-Answering Agent Example
 #
 # This example demonstrates how to create a basic LLM-powered
-# question-answering agent without tools.
+# question-answering agent using LLMAgent framework.
+#
+# Key concepts demonstrated:
+# 1. Configuring a mock LLM provider for testing
+# 2. Creating a simple QA agent with system prompt
+# 3. Handling conversations and responses
+# 4. Error handling and state management
 #
 # Run with: elixir simple_qa_agent.exs
 
-# Import required modules
-alias LLMAgent.{Signals, Store}
-alias AgentForge.Store, as: AFStore
+# First, let's define a mock LLM provider for testing
+defmodule MockElixirQAProvider do
+  @behaviour LLMAgent.Provider
 
-# Create a system prompt that defines the agent's behavior
-system_prompt = """
-You are a helpful assistant that specializes in explaining Elixir concepts.
-Your answers should be clear, concise, and accurate.
-"""
+  @impl true
+  def generate_response(messages, _opts \\ []) do
+    # Get the last user message
+    last_message =
+      messages
+      |> Enum.reverse()
+      |> Enum.find(fn msg -> msg["role"] == "user" end)
 
-# Create demo module to show question-answering capabilities
-defmodule LLMAgent.Examples.SimpleQA do
-  @moduledoc """
-  Demonstrates a simple question-answering agent built with LLMAgent.
-  """
-  
-  @doc """
-  Run the QA agent demo with several example questions
-  """
-  def run do
-    IO.puts("\n=== Simple Question-Answering Agent Example ===\n")
-    
-    # Example questions to process
-    questions = [
-      "What is Elixir?",
-      "How do processes work in Elixir?", 
-      "What's the difference between map and reduce in Elixir?"
-    ]
-    
-    # Process each question and show response
-    Enum.each(questions, &process_question/1)
-    
-    IO.puts("\n=== Example complete ===\n")
-  end
-  
-  # Process a single question and display result
-  defp process_question(question) do
-    IO.puts("\nQuestion: #{question}")
-    
-    # In a real implementation, we would create a conversation flow with our system prompt
-    # store_name = :qa_agent_store
-    # store = Store.new(%{}, name: store_name)
-    # {flow, _} = LLMAgent.Flows.conversation(system_prompt, [], store)
-    # 
-    # Create a user message signal and add it to the state
-    # user_message = Signals.user_message(question)
-    # :ok = Store.add_message(store, "user", question)
-    #
-    # Then run the agent (in real implementation uses AgentForge underneath) 
-    # response = LLMAgent.run(flow, user_message)
-    #
-    # For the example, we'll show the API patterns but use mock responses
-    mock_conversation_result(question)
-  end
-  
-  # Simulate a conversation result that would come from LLMAgent.run
-  defp mock_conversation_result(question) do
-    # In a real implementation, the LLM would generate this response
-    # Here we're mocking what those signals would look like
-    response = case question do
-      "What is Elixir?" ->
-        %{
-          type: :response,
-          data: %{
-            content: "Elixir is a functional, concurrent programming language built on the Erlang VM (BEAM). " <>
-                   "It combines the functional paradigm with a syntax inspired by Ruby, making it both " <>
-                   "powerful and pleasant to work with. Elixir excels at building scalable, fault-tolerant " <>
-                   "applications, especially for distributed systems."
-          }
-        }
-        
-      "How do processes work in Elixir?" ->
-        %{
-          type: :response,
-          data: %{
-            content: "In Elixir, processes are lightweight units of concurrency managed by the BEAM VM, not OS processes. " <>
-                   "They communicate via message passing, are isolated from each other (sharing no memory), " <>
-                   "and are extremely lightweight (can create millions). This actor-based concurrency model " <>
-                   "helps build fault-tolerant systems through supervision trees, where processes can monitor " <>
-                   "and restart other processes when they fail."
-          }
-        }
-        
+    question = last_message["content"]
+
+    # Simulate LLM response format
+    response = case String.downcase(question) do
+      q when String.contains?(q, "elixir") and String.contains?(q, "what is") ->
+        {:ok, %{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "Elixir is a dynamic, functional programming language designed for building scalable and maintainable applications. It runs on the BEAM (Erlang's virtual machine) and excels at handling concurrency, fault tolerance, and distributed computing.",
+                "role" => "assistant"
+              }
+            }
+          ]
+        }}
+
+      q when String.contains?(q, "process") ->
+        {:ok, %{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "Elixir processes are lightweight units of concurrency managed by the BEAM VM. They're isolated, communicate through message passing, and can be created in large numbers (millions) due to their efficiency. They're fundamental to Elixir's actor-based concurrency model.",
+                "role" => "assistant"
+              }
+            }
+          ]
+        }}
+
+      q when String.contains?(q, "error") ->
+        {:error, "Simulated LLM error for testing error handling"}
+
       _ ->
-        %{
-          type: :response,
-          data: %{
-            content: "Map transforms each element in a collection by applying a function to it, returning a collection " <>
-                   "of the same size. Reduce (or fold) combines all elements into a single accumulated value. " <>
-                   "Map returns a new collection with transformed elements. Reduce returns a single value. " <>
-                   "In Elixir: `Enum.map([1,2,3], &(&1*2))` returns `[2,4,6]`, while " <>
-                   "`Enum.reduce([1,2,3], 0, &(&1+&2))` returns `6`."
-          }
-        }
+        {:ok, %{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "I'll explain this in the context of Elixir: #{question}",
+                "role" => "assistant"
+              }
+            }
+          ]
+        }}
     end
-    
-    # Display the response as it would be handled in a real implementation
-    display_response(response)
-  end
-  
-  # Display the response from the LLM
-  defp display_response(%{type: :response} = signal) do
-    IO.puts("Answer: #{signal.data.content}")
-  end
-  
-  defp display_response(%{type: :error} = signal) do
-    IO.puts("Error occurred: #{inspect(signal.data)}")
-  end
-  
-  defp display_response(other_signal) do
-    IO.puts("Unexpected signal: #{inspect(other_signal)}")
+
+    # Add some latency to simulate real API calls
+    Process.sleep(100)
+    response
   end
 end
 
-# Run the QA agent example
+defmodule LLMAgent.Examples.SimpleQA do
+  @moduledoc """
+  Demonstrates a simple question-answering agent built with LLMAgent.
+  Shows proper error handling and conversation management.
+  """
+
+  alias LLMAgent.{Flows, Signals, Store}
+
+  def run do
+    # 1. Configure LLMAgent to use our mock provider
+    Application.put_env(:llm_agent, :provider, MockElixirQAProvider)
+
+    # 2. Create store for this example
+    store_name = :"elixir_qa_store"
+    _store = Store.start_link(name: store_name)
+
+    # 3. Create system prompt that defines the agent's behavior
+    system_prompt = """
+    You are a helpful assistant that specializes in explaining Elixir concepts.
+    Your answers should be clear, concise, and accurate.
+    When giving code examples, use proper Elixir syntax.
+    """
+
+    # 4. Create conversation flow
+    {flow, state} = Flows.qa_agent(system_prompt, store_name: store_name)
+
+    IO.puts("\n=== Simple Question-Answering Agent Example ===\n")
+    IO.puts("This example demonstrates:")
+    IO.puts("- Using LLMAgent with a mock LLM provider")
+    IO.puts("- Proper conversation flow and state management")
+    IO.puts("- Error handling and response processing\n")
+
+    # 5. Process example questions
+    questions = [
+      "What is Elixir?",
+      "How do processes work in Elixir?",
+      "trigger an error",  # Will demonstrate error handling
+      "What's special about pattern matching?"
+    ]
+
+    # Process each question
+    Enum.each(questions, fn question ->
+      IO.puts("\nQuestion: #{question}")
+
+      # Create user message signal
+      signal = Signals.user_message(question)
+
+      # Process the message through the flow
+      case LLMAgent.process(flow, signal, state) do
+        {:ok, response, _new_state} ->
+          # Display the response
+          display_response(response)
+
+        {:error, error, _state} ->
+          # Display error
+          IO.puts("Error: #{error}")
+      end
+    end)
+
+    # 6. Show conversation history from Store
+    IO.puts("\n=== Conversation History ===")
+    history = Store.get_llm_history(store_name)
+    Enum.each(history, fn message ->
+      case message do
+        %{role: "system"} ->
+          IO.puts("System: #{message.content}")
+        %{role: "user"} ->
+          IO.puts("\nHuman: #{message.content}")
+        %{role: "assistant"} ->
+          IO.puts("Assistant: #{message.content}")
+        _ ->
+          IO.puts("#{String.capitalize(message.role)}: #{message.content}")
+      end
+    end)
+
+    IO.puts("\n=== Example Complete ===")
+    IO.puts("""
+
+    To use this in your own application:
+
+    1. Configure your LLM provider:
+       Application.put_env(:llm_agent, :provider, LLMAgent.Providers.OpenAI)
+       Application.put_env(:llm_agent, :api_key, System.get_env("OPENAI_API_KEY"))
+
+    2. Initialize store and create QA agent:
+       store_name = MyApp.ConversationStore
+       Store.start_link(name: store_name)
+       {flow, state} = LLMAgent.Flows.qa_agent(system_prompt, store_name: store_name)
+
+    3. Process messages:
+       {:ok, response} = LLMAgent.process(flow, Signals.user_message(question), state)
+
+    4. Handle responses:
+       case response do
+         %{type: :response} -> handle_response(response.data)
+         %{type: :error} -> handle_error(response.data)
+       end
+
+    5. Get conversation history:
+       history = LLMAgent.Store.get_llm_history(store_name)
+    """)
+  end
+
+  # Display different types of responses
+  defp display_response(%{type: :response} = signal) do
+    IO.puts("Assistant: #{signal.data}")
+  end
+
+  defp display_response(%{type: :error} = signal) do
+    IO.puts("Error: #{signal.data.message}")
+  end
+
+  defp display_response(other) do
+    IO.puts("Unexpected response: #{inspect(other)}")
+  end
+end
+
+# Run the example
 LLMAgent.Examples.SimpleQA.run()

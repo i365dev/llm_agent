@@ -9,23 +9,29 @@ defmodule LLMAgent.Handlers do
 
   require Logger
 
-  alias LLMAgent.{Signals}
+  alias LLMAgent.{Signals, Store}
+
+  # Get store name from state or use default
+  defp get_store_name(state) do
+    Map.get(state, :store_name, LLMAgent.Store)
+  end
 
   @doc """
   Handles user message signals.
   """
   def message_handler(%{type: :user_message} = signal, state) do
     Logger.info("Processing user message: #{inspect(signal.data)}")
+    store_name = get_store_name(state)
 
-    # Add user message to history
-    new_state = add_message(state, "user", signal.data)
+    # Store the user message in history
+    Store.add_message(store_name, "user", signal.data)
 
     # Get provider and tools configuration
     provider = Map.get(state, :provider, :openai)
     tools = Map.get(state, :available_tools, [])
 
-    # Prepare LLM context from history
-    history = Map.get(new_state, :history, [])
+    # Get conversation history from Store
+    history = Store.get_llm_history(store_name)
 
     # Call LLM with updated context
     try do
@@ -47,24 +53,22 @@ defmodule LLMAgent.Handlers do
             args: first_tool.arguments
           }
 
-          {{:emit, Signals.tool_call(tool_data.name, tool_data.args)}, new_state}
+          {{:emit, Signals.tool_call(tool_data.name, tool_data.args)}, state}
 
         contains_thinking_marker?(llm_result) ->
           thought = extract_content(llm_result)
-          updated_state = add_thought(new_state, thought)
-          {{:emit, Signals.thinking(thought, 1)}, updated_state}
+          Store.add_thought(store_name, thought)
+          {{:emit, Signals.thinking(thought, 1)}, state}
 
         true ->
           content = extract_content(llm_result)
-          updated_state = add_message(new_state, "assistant", content)
-          {{:emit, Signals.response(content)}, updated_state}
+          Store.add_message(store_name, "assistant", content)
+          {{:emit, Signals.response(content)}, state}
       end
     rescue
       error ->
         Logger.error("Error in message handler: #{inspect(error)}")
-
-        {{:emit, Signals.error("LLM processing failed: #{inspect(error)}", "llm_call")},
-         new_state}
+        {{:emit, Signals.error("LLM processing failed: #{inspect(error)}", "llm_call")}, state}
     end
   end
 
@@ -75,23 +79,17 @@ defmodule LLMAgent.Handlers do
   """
   def thinking_handler(%{type: :thinking} = signal, state) do
     Logger.info("Processing thinking step: #{inspect(signal.data)}")
+    store_name = get_store_name(state)
 
     # Get current step and thought
     step = signal.meta.step
     thought = signal.data
 
-    # Add thought to state if not already there
-    thoughts = Map.get(state, :thoughts, [])
-
-    new_state =
-      if Enum.member?(thoughts, thought) do
-        state
-      else
-        add_thought(state, thought)
-      end
+    # Add thought if not already present
+    Store.add_thought(store_name, thought)
 
     # Get history and tools
-    history = Map.get(new_state, :history, [])
+    history = Store.get_llm_history(store_name)
     tools = Map.get(state, :available_tools, [])
     provider = Map.get(state, :provider, :openai)
 
@@ -114,17 +112,17 @@ defmodule LLMAgent.Handlers do
             args: first_tool.arguments
           }
 
-          {{:emit, Signals.tool_call(tool_data.name, tool_data.args)}, new_state}
+          {{:emit, Signals.tool_call(tool_data.name, tool_data.args)}, state}
 
         should_continue_thinking?(llm_result, step) ->
           next_thought = extract_content(llm_result)
-          updated_state = add_thought(new_state, next_thought)
-          {{:emit, Signals.thinking(next_thought, step + 1)}, updated_state}
+          Store.add_thought(store_name, next_thought)
+          {{:emit, Signals.thinking(next_thought, step + 1)}, state}
 
         true ->
           content = extract_content(llm_result)
-          final_state = add_message(new_state, "assistant", content)
-          {{:emit, Signals.response(content)}, final_state}
+          Store.add_message(store_name, "assistant", content)
+          {{:emit, Signals.response(content)}, state}
       end
     rescue
       error ->
@@ -139,6 +137,7 @@ defmodule LLMAgent.Handlers do
   Handles tool call signals.
   """
   def tool_handler(%{type: :tool_call} = signal, state) do
+    store_name = get_store_name(state)
     tool_name = signal.data.name
     tool_args = signal.data.args
 
@@ -150,20 +149,20 @@ defmodule LLMAgent.Handlers do
       {:ok, tool_fn} when is_function(tool_fn) ->
         try do
           result = tool_fn.(tool_args)
-          new_state = add_tool_call(state, tool_name, tool_args, result)
-          {{:emit, Signals.tool_result(tool_name, result)}, new_state}
+          Store.add_tool_call(store_name, tool_name, tool_args, result)
+          {{:emit, Signals.tool_result(tool_name, result)}, state}
         rescue
           e ->
             error_message = Exception.message(e)
-            new_state = add_tool_call(state, tool_name, tool_args, %{error: error_message})
-            {{:emit, Signals.error(error_message, tool_name)}, new_state}
+            Store.add_tool_call(store_name, tool_name, tool_args, %{error: error_message})
+            {{:emit, Signals.error(error_message, tool_name)}, state}
         end
 
       {:error, reason} ->
         error_message = "Tool not found: #{reason}"
         Logger.warning(error_message)
-        new_state = add_tool_call(state, tool_name, tool_args, %{error: error_message})
-        {{:emit, Signals.error(error_message, tool_name)}, new_state}
+        Store.add_tool_call(store_name, tool_name, tool_args, %{error: error_message})
+        {{:emit, Signals.error(error_message, tool_name)}, state}
     end
   end
 
@@ -173,21 +172,18 @@ defmodule LLMAgent.Handlers do
   Handles tool result signals.
   """
   def tool_result_handler(%{type: :tool_result} = signal, state) do
+    store_name = get_store_name(state)
     Logger.info("Processing tool result: #{inspect(signal.data)}")
 
     tool_name = signal.data.name
     tool_result = signal.data.result
 
-    history = Map.get(state, :history, [])
+    # Get history from Store
+    history = Store.get_llm_history(store_name)
     tools = Map.get(state, :available_tools, [])
 
-    # Update pending tools
-    new_state =
-      state
-      |> Map.update(:pending_tools, [], fn pending ->
-        Enum.reject(pending, fn %{name: name} -> name == tool_name end)
-      end)
-      |> add_function_result(tool_name, tool_result)
+    # Add function result to Store
+    Store.add_function_result(store_name, tool_name, tool_result)
 
     try do
       provider = Map.get(state, :provider, :openai)
@@ -205,17 +201,17 @@ defmodule LLMAgent.Handlers do
         has_tool_calls?(llm_result) ->
           tool_calls = extract_tool_calls(llm_result)
           [first_tool | _rest] = tool_calls
-          {{:emit, Signals.tool_call(first_tool.name, first_tool.arguments)}, new_state}
+          {{:emit, Signals.tool_call(first_tool.name, first_tool.arguments)}, state}
 
         should_continue_thinking?(llm_result, 1) ->
           next_thought = extract_content(llm_result)
-          updated_state = add_thought(new_state, next_thought)
-          {{:emit, Signals.thinking(next_thought, 2)}, updated_state}
+          Store.add_thought(store_name, next_thought)
+          {{:emit, Signals.thinking(next_thought, 2)}, state}
 
         true ->
           content = extract_content(llm_result)
-          final_state = add_message(new_state, "assistant", content)
-          {{:emit, Signals.response(content)}, final_state}
+          Store.add_message(store_name, "assistant", content)
+          {{:emit, Signals.response(content)}, state}
       end
     rescue
       error ->
@@ -231,11 +227,13 @@ defmodule LLMAgent.Handlers do
   Handles task state signals.
   """
   def task_handler(%{type: :task_state} = signal, state) do
+    store_name = get_store_name(state)
     task_id = signal.data.task_id
     task_state = signal.data.state
 
-    new_state = update_task_state(state, task_id, task_state)
-    {:skip, new_state}
+    # Update task state in Store
+    Store.update_task_state(store_name, task_id, task_state)
+    {:skip, state}
   end
 
   def task_handler(_signal, state), do: {:skip, state}
@@ -262,6 +260,7 @@ defmodule LLMAgent.Handlers do
   Handles error signals.
   """
   def error_handler(%{type: :error} = signal, state) do
+    store_name = get_store_name(state)
     message = signal.data.message
     source = signal.data.source
 
@@ -282,58 +281,14 @@ defmodule LLMAgent.Handlers do
           {"An error occurred: #{message}", :generic_error}
       end
 
-    updated_state =
-      state
-      |> add_error({error_type, message, DateTime.utc_now()})
-      |> add_message("assistant", response)
+    # Add error and response to store
+    Store.add_error(store_name, {error_type, message, DateTime.utc_now()})
+    Store.add_message(store_name, "assistant", response)
 
-    {{:emit, Signals.response(response)}, updated_state}
+    {{:emit, Signals.response(response)}, state}
   end
 
   def error_handler(_signal, state), do: {:skip, state}
-
-  # Helper functions for state management
-  defp add_message(state, role, content) do
-    history = Map.get(state, :history, [])
-    Map.put(state, :history, history ++ [%{role: role, content: content}])
-  end
-
-  defp add_thought(state, thought) do
-    thoughts = Map.get(state, :thoughts, [])
-    Map.put(state, :thoughts, thoughts ++ [thought])
-  end
-
-  defp add_tool_call(state, tool_name, args, result) do
-    tool_calls = Map.get(state, :tool_calls, [])
-    new_call = %{name: tool_name, args: args, result: result}
-    Map.put(state, :tool_calls, tool_calls ++ [new_call])
-  end
-
-  defp add_function_result(state, tool_name, result) do
-    history = Map.get(state, :history, [])
-    new_entry = %{role: "function", name: tool_name, content: Jason.encode!(result)}
-    Map.put(state, :history, history ++ [new_entry])
-  end
-
-  defp add_error(state, error) do
-    errors = Map.get(state, :errors, [])
-    Map.put(state, :errors, errors ++ [error])
-  end
-
-  defp update_task_state(state, task_id, new_state) do
-    tasks = Map.get(state, :current_tasks, [])
-
-    updated_tasks =
-      Enum.map(tasks, fn task ->
-        if task.id == task_id do
-          %{task | status: new_state}
-        else
-          task
-        end
-      end)
-
-    Map.put(state, :current_tasks, updated_tasks)
-  end
 
   # Helper functions for LLM processing (unchanged)
   defp format_history_with_thought(history, thought) do

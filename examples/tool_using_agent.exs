@@ -1,33 +1,124 @@
-# Tool-using agent example
+# Tool-Using Agent Example
 #
 # This example demonstrates how to create an LLM-powered agent
 # that can use tools to perform calculations and get the current time.
+# It shows how to properly implement tool-using capabilities with LLMAgent.
+#
+# Key concepts demonstrated:
+# 1. Configuring a mock LLM provider that can handle tool calls
+# 2. Defining and registering tools
+# 3. Processing tool calls and results
+# 4. Error handling for tool execution
 #
 # Run with: elixir tool_using_agent.exs
 
-# Import required modules
-alias LLMAgent.{Signals, Store}
+# First, let's define a mock LLM provider that can handle tool usage
+defmodule MockToolUsingProvider do
+  @behaviour LLMAgent.Provider
 
-# Create a system prompt that defines the agent's behavior
-system_prompt = """
-You are a helpful assistant that can perform calculations and tell the current time.
-When asked to perform calculations, use the calculator tool.
-When asked about the time, use the current_time tool.
-"""
+  @impl true
+  def generate_response(messages, _opts \\ []) do
+    # Get the last user message
+    last_message =
+      messages
+      |> Enum.reverse()
+      |> Enum.find(fn msg -> msg["role"] == "user" end)
 
-# Create a demonstration module for a tool-using agent
+    question = last_message["content"]
+
+    # Simulate LLM deciding whether to use tools
+    cond do
+      String.contains?(String.downcase(question), ["calculate", "*", "+", "-", "/"]) ->
+        # Simulate LLM deciding to use calculator
+        expression = extract_math_expression(question)
+        {:ok, %{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "Let me calculate that for you.",
+                "tool_calls" => [
+                  %{
+                    "function" => %{
+                      "name" => "calculator",
+                      "arguments" => Jason.encode!(%{"expression" => expression})
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }}
+
+      String.contains?(String.downcase(question), ["time", "date"]) ->
+        # Simulate LLM deciding to use time tool
+        format = if String.contains?(question, "ISO"), do: "iso8601", else: "utc"
+        {:ok, %{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "I'll check the current time.",
+                "tool_calls" => [
+                  %{
+                    "function" => %{
+                      "name" => "current_time",
+                      "arguments" => Jason.encode!(%{"format" => format})
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }}
+
+      String.contains?(question, "error") ->
+        {:error, "Simulated LLM error"}
+
+      true ->
+        {:ok, %{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "I don't need any tools to answer this: #{question}",
+                "role" => "assistant"
+              }
+            }
+          ]
+        }}
+    end
+  end
+
+  # Helper to extract math expression from question
+  defp extract_math_expression(question) do
+    cond do
+      String.contains?(question, "*") ->
+        Regex.run(~r/(\d+)\s*\*\s*(\d+)/, question)
+        |> Enum.drop(1)
+        |> Enum.join(" * ")
+      String.contains?(question, "+") ->
+        Regex.run(~r/(\d+)\s*\+\s*(\d+)/, question)
+        |> Enum.drop(1)
+        |> Enum.join(" + ")
+      true -> "0"
+    end
+  end
+end
+
 defmodule LLMAgent.Examples.ToolDemo do
   @moduledoc """
-  Demonstrates a tool-using agent with LLMAgent, showing how
-  the agent can use tools to perform calculations and get the current time.
+  Demonstrates a tool-using agent built with LLMAgent.
+  Shows proper tool registration, handling, and error management.
   """
-  
-  # Define tools the agent can use directly inside the module
-  def tools do
+
+  alias LLMAgent.{Flows, Signals, Store}
+
+  @doc """
+  Define tools that the agent can use
+  """
+  def get_tools do
     [
       %{
         name: "calculator",
-        description: "Perform mathematical calculations. Requires an 'expression' parameter.",
+        description: "Perform mathematical calculations",
         parameters: %{
           "type" => "object",
           "properties" => %{
@@ -39,212 +130,169 @@ defmodule LLMAgent.Examples.ToolDemo do
           "required" => ["expression"]
         },
         execute: fn args ->
-          expr = Map.get(args, "expression", "0")
-          
+          expr = args["expression"]
           try do
             {result, _} = Code.eval_string(expr)
             %{result: result}
           rescue
-            e -> %{error: "Failed to evaluate expression: #{inspect(e)}"}
+            e -> %{error: "Failed to evaluate: #{inspect(e)}"}
           end
         end
       },
       %{
         name: "current_time",
-        description: "Get the current time and date.",
+        description: "Get the current time",
         parameters: %{
           "type" => "object",
           "properties" => %{
             "format" => %{
               "type" => "string",
-              "description" => "Optional format parameter, can be 'iso8601', 'utc', or 'unix'",
               "enum" => ["iso8601", "utc", "unix"]
             }
           }
         },
-        execute: fn args -> 
+        execute: fn args ->
           now = DateTime.utc_now()
-          
-          case Map.get(args, "format") do
-            "iso8601" -> %{time: DateTime.to_iso8601(now), format: "ISO 8601"}
-            "unix" -> %{time: DateTime.to_unix(now), format: "Unix timestamp"}
-            _ -> %{
-              utc_time: DateTime.to_string(now),
-              iso8601: DateTime.to_iso8601(now),
-              unix_timestamp: DateTime.to_unix(now)
-            }
+          case args["format"] do
+            "iso8601" -> %{time: DateTime.to_iso8601(now)}
+            "unix" -> %{time: DateTime.to_unix(now)}
+            _ -> %{time: DateTime.to_string(now)}
           end
         end
       }
     ]
   end
-  
-  @doc """
-  Run the tool-using agent demo with several example questions
-  """
+
   def run do
+    # 1. Configure LLMAgent to use our mock provider
+    Application.put_env(:llm_agent, :provider, MockToolUsingProvider)
+
+    # 2. Create store for this example
+    store_name = :"tool_using_store"
+    _store = Store.start_link(name: store_name)
+
+    # 3. Create system prompt for tool-using agent
+    system_prompt = """
+    You are a helpful assistant that can use tools to help answer questions.
+    Available tools:
+    - calculator: For mathematical calculations
+    - current_time: To get the current time in different formats
+
+    Use tools whenever relevant to provide accurate answers.
+    """
+
+    # 4. Create a conversation flow with tools and store
+    {flow, state} = Flows.tool_agent(system_prompt, get_tools(), store_name: store_name)
+
     IO.puts("\n=== Tool-Using Agent Example ===\n")
-    
-    # Example questions that require tool use
+    IO.puts("This example demonstrates:")
+    IO.puts("- Using LLMAgent with tools")
+    IO.puts("- Tool selection and execution")
+    IO.puts("- Error handling for tools\n")
+
+    # 5. Process example questions
     questions = [
-      "What's 42 * 73?",
-      "What time is it right now?",
-      "If I have 24 apples and give away 1/3 of them, how many do I have left?",
-      "What's the current date and time in ISO 8601 format?"
+      "Calculate 42 * 73",
+      "What time is it in ISO format?",
+      "What's 5 + 7?",
+      "trigger an error",  # Will demonstrate error handling
+      "Tell me a joke"     # Won't use any tools
     ]
-    
-    # Process each question and show response
-    Enum.each(questions, &process_question/1)
-    
-    IO.puts("\n=== Example complete ===\n")
+
+    # Process each question
+    Enum.each(questions, fn question ->
+      IO.puts("\nQuestion: #{question}")
+
+      # Create user message signal
+      signal = Signals.user_message(question)
+
+      # Process through the flow
+      case LLMAgent.process(flow, signal, state) do
+        {:ok, response, _new_state} ->
+          # Display the response
+          display_response(response)
+
+        {:error, error, _state} ->
+          # Display error
+          IO.puts("Error: #{error}")
+      end
+    end)
+
+    # Show conversation and tool interaction history
+    IO.puts("\n=== Interaction History ===")
+    history = Store.get_llm_history(store_name)
+    Enum.each(history, fn message ->
+      case message do
+        %{role: "system"} ->
+          IO.puts("System: #{message.content}")
+        %{role: "user"} ->
+          IO.puts("\nHuman: #{message.content}")
+        %{role: "assistant"} ->
+          IO.puts("Assistant: #{message.content}")
+        %{role: "function", name: name} ->
+          IO.puts("Tool (#{name}): #{message.content}")
+        _ ->
+          IO.puts("#{String.capitalize(message.role)}: #{message.content}")
+      end
+    end)
+
+    IO.puts("\n=== Example Complete ===")
+    IO.puts("""
+
+    To use this in your own application:
+
+    1. Define your tools:
+       tools = [
+         %{
+           name: "my_tool",
+           description: "Tool description",
+           parameters: %{...},
+           execute: fn args -> ... end
+         }
+       ]
+
+    2. Initialize store and create tool-using agent:
+       store_name = MyApp.ToolStore
+       Store.start_link(name: store_name)
+       {flow, state} = LLMAgent.Flows.tool_agent(system_prompt, tools, store_name: store_name)
+
+    3. Process messages:
+       {:ok, response} = LLMAgent.process(flow, Signals.user_message(question), state)
+
+    4. Handle responses:
+       case response do
+         %{type: :response} -> handle_response(response.data)
+         %{type: :tool_call} -> handle_tool_call(response.data)
+         %{type: :error} -> handle_error(response.data)
+       end
+
+    5. Get interaction history:
+       history = LLMAgent.Store.get_llm_history(store_name)
+    """)
   end
-  
-  # Process a single question using the LLM agent
-  defp process_question(question) do
-    IO.puts("\nQuestion: #{question}")
-    
-    # In a real implementation, we would:
-    # 1. Create a conversation flow with our system prompt and tools
-    # {flow, initial_state} = LLMAgent.Flows.conversation(system_prompt, tools())
-    # 
-    # 2. Create a user message signal and add it to the state
-    # user_message = Signals.user_message(question)
-    # state = Store.add_message(initial_state, "user", question)
-    #
-    # 3. Run the agent (in real implementation would use LLMAgent.run which encapsulates AgentForge)
-    # response = LLMAgent.run(flow, state)
-    #
-    # For this example, we'll show the API patterns but simulate LLM responses and tool calls
-    mock_agent_interaction(question)
-  end
-  
-  # Simulate agent interaction that would happen with actual LLM
-  defp mock_agent_interaction(question) do
-    # Simulate what the LLM would decide to do
-    # In a real implementation, the LLM would return a signal that might indicate
-    # thinking, tool usage, or a direct response
-    
-    cond do
-      String.contains?(question, ["*", "+", "-", "/", "apples"]) ->
-        # Simulate the agent deciding to use the calculator tool
-        simulate_tool_usage("calculator", question)
-        
-      String.contains?(question, ["time", "date", "ISO"]) ->
-        # Simulate the agent deciding to use the time tool
-        simulate_tool_usage("current_time", question)
-        
-      true ->
-        # Simulate the agent responding directly without tools
-        response = %{
-          type: :response,
-          data: %{
-            content: "I don't have the tools to answer that question effectively."
-          }
-        }
-        display_response(response)
-    end
-  end
-  
-  # Simulate the agent deciding to call a tool
-  defp simulate_tool_usage(tool_name, question) do
-    # In a real implementation, this would be a signal flow:
-    # 1. The LLM generates a tool_call signal
-    # 2. The handler processes the tool call
-    # 3. The tool result is added to the state
-    # 4. The LLM generates a final response based on the tool result
-    
-    case tool_name do
-      "calculator" ->
-        # Simulate the LLM generating a tool call for calculator
-        IO.puts("[AGENT THINKING]: I need to use the calculator tool to solve this.")
-        
-        # Extract expression from question (this is what the LLM would do)
-        expression = cond do
-          String.contains?(question, "42 * 73") -> "42 * 73"
-          String.contains?(question, "24 apples") -> "24 - (24 / 3)"
-          true -> "0"
-        end
-        
-        # Simulate generating a tool_call signal (in real implementation, this would be done by LLM)
-        tool_call_signal = %{
-          type: :tool_call,
-          data: %{
-            tool: "calculator",
-            arguments: %{"expression" => expression}
-          }
-        }
-        IO.puts("[TOOL CALL]: #{tool_call_signal.data.tool}(#{expression})")
-        
-        # Execute the tool (this is what the handler would do)
-        calculator = Enum.find(tools(), fn t -> t.name == "calculator" end)
-        result = calculator.execute.(%{"expression" => expression})
-        
-        # Simulate adding the function result to state (handled by LLMAgent.Store)
-        # state = Store.add_function_result(state, "calculator", inspect(result))
-        
-        # Simulate the LLM generating a final response based on tool result
-        response = %{
-          type: :response,
-          data: %{
-            content: if String.contains?(question, "apples") do
-              "I used the calculator to figure this out. If you have 24 apples and give away 1/3 of them,"
-              <> " you'd be giving away 8 apples. That leaves you with #{result.result} apples."
-            else
-              "I calculated that #{expression} = #{result.result}."
-            end
-          }
-        }
-        display_response(response)
-        
-      "current_time" ->
-        # Simulate the LLM generating a tool call for current_time
-        IO.puts("[AGENT THINKING]: I should use the current_time tool for this.")
-        
-        # Determine what format is requested (simulating LLM reasoning)
-        format = if String.contains?(question, "ISO"), do: "iso8601", else: "utc"
-        
-        # Simulate generating a tool_call signal
-        tool_call_signal = %{
-          type: :tool_call,
-          data: %{
-            tool: "current_time",
-            arguments: (if format == "iso8601", do: %{"format" => "iso8601"}, else: %{})
-          }
-        }
-        IO.puts("[TOOL CALL]: #{tool_call_signal.data.tool}(#{inspect(tool_call_signal.data.arguments)})")
-        
-        # Execute the tool
-        time_tool = Enum.find(tools(), fn t -> t.name == "current_time" end)
-        time_data = time_tool.execute.(tool_call_signal.data.arguments)
-        
-        # Simulate the LLM generating a final response based on tool result
-        response = %{
-          type: :response,
-          data: %{
-            content: if String.contains?(question, "ISO") do
-              "According to my current_time tool, the current date and time in ISO 8601 format is #{time_data.time}."
-            else
-              "The current time is #{time_data.utc_time} (UTC)."
-            end
-          }
-        }
-        display_response(response)
-    end
-  end
-  
-  # Display the response from the LLM
+
+  # Display different types of responses
   defp display_response(%{type: :response} = signal) do
-    IO.puts("Answer: #{signal.data.content}")
+    IO.puts("Assistant: #{signal.data}")
   end
-  
+
+  defp display_response(%{type: :tool_call} = signal) do
+    tool = signal.data
+    IO.puts("Using tool: #{tool.name} with args: #{inspect(tool.args)}")
+  end
+
+  defp display_response(%{type: :tool_result} = signal) do
+    IO.puts("Tool result: #{inspect(signal.data)}")
+  end
+
   defp display_response(%{type: :error} = signal) do
-    IO.puts("Error occurred: #{inspect(signal.data)}")
+    IO.puts("Error: #{signal.data.message}")
   end
-  
-  defp display_response(other_signal) do
-    IO.puts("Unexpected signal: #{inspect(other_signal)}")
+
+  defp display_response(other) do
+    IO.puts("Unexpected response: #{inspect(other)}")
   end
 end
 
-# Run the tool-using agent example
+# Run the example
 LLMAgent.Examples.ToolDemo.run()
