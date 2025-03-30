@@ -34,7 +34,15 @@ defmodule MockInvestmentProvider do
   Generate a response based on the current conversation state.
   Dynamically decides which tools to use based on previous tool results and user input.
   """
-  def generate_response(messages, _opts \\ []) do
+  def generate_response(messages, opts \\ []) do
+    # 0. Log that the mock provider is being called
+    Logger.info(
+      "MockInvestmentProvider.generate_response called with #{length(messages)} messages"
+    )
+
+    Logger.debug("Messages: #{inspect(messages)}")
+    Logger.debug("Options: #{inspect(opts)}")
+
     # 1. Extract key information from conversation history
     last_user_message = get_last_user_message(messages)
     tool_results = get_tool_results(messages)
@@ -46,11 +54,13 @@ defmodule MockInvestmentProvider do
     Logger.debug("Analyzing conversation context: #{inspect(context)}")
 
     # 4. Make dynamic workflow decisions based on context
+    # Use the workflow state to drive the next phase of analysis
     cond do
-      # INITIAL PORTFOLIO ANALYSIS PATH
-      # Start a new portfolio analysis if we haven't run the ETF screener yet
-      # and the user is asking about portfolio creation
-      context.is_new_portfolio_request and not context.has_etf_data ->
+      # PHASE 1: INITIAL PORTFOLIO ANALYSIS PATH
+      # Extended matching condition to trigger tool call flow on first interaction
+      # If user has sent any message and we haven't started analysis yet, proactively start workflow
+      (context.is_new_portfolio_request or String.length(last_user_message) > 0) and
+          not context.has_etf_data ->
         Logger.info("Starting new portfolio analysis workflow")
 
         # Dynamic behavior: Choose initial analysis approach based on question content
@@ -63,6 +73,8 @@ defmodule MockInvestmentProvider do
                    "I'll analyze available investment options for your #{context.risk_profile} risk profile.",
                  "tool_calls" => [
                    %{
+                     "id" => "call_#{:rand.uniform(999_999)}",
+                     "type" => "function",
                      "function" => %{
                        "name" => "etf_screener",
                        "arguments" =>
@@ -78,7 +90,7 @@ defmodule MockInvestmentProvider do
            ]
          }}
 
-      # PORTFOLIO CONSTRUCTION PATH
+      # PHASE 2: PORTFOLIO CONSTRUCTION PATH
       # After ETF screening, create the portfolio if not done yet
       context.has_etf_data and not context.has_portfolio ->
         Logger.info("Proceeding to portfolio construction phase")
@@ -95,6 +107,8 @@ defmodule MockInvestmentProvider do
                    "Based on the available ETFs, I'll construct a #{context.risk_profile} portfolio for you.",
                  "tool_calls" => [
                    %{
+                     "id" => "call_#{:rand.uniform(999_999)}",
+                     "type" => "function",
                      "function" => %{
                        "name" => "portfolio_constructor",
                        "arguments" =>
@@ -124,6 +138,8 @@ defmodule MockInvestmentProvider do
                    "Let me evaluate how this portfolio would have performed historically.",
                  "tool_calls" => [
                    %{
+                     "id" => "call_#{:rand.uniform(999_999)}",
+                     "type" => "function",
                      "function" => %{
                        "name" => "portfolio_backtester",
                        "arguments" =>
@@ -155,6 +171,8 @@ defmodule MockInvestmentProvider do
                  "content" => "I'll adjust the portfolio to #{risk_preference} risk level.",
                  "tool_calls" => [
                    %{
+                     "id" => "call_#{:rand.uniform(999_999)}",
+                     "type" => "function",
                      "function" => %{
                        "name" => "portfolio_optimizer",
                        "arguments" =>
@@ -188,7 +206,8 @@ defmodule MockInvestmentProvider do
            "choices" => [
              %{
                "message" => %{
-                 "content" => generate_portfolio_analysis(portfolio, backtest)
+                 "content" => generate_portfolio_analysis(portfolio, backtest),
+                 "role" => "assistant"
                }
              }
            ]
@@ -211,6 +230,8 @@ defmodule MockInvestmentProvider do
                    "I'll simulate how your portfolio might perform during a #{scenario_type} market.",
                  "tool_calls" => [
                    %{
+                     "id" => "call_#{:rand.uniform(999_999)}",
+                     "type" => "function",
                      "function" => %{
                        "name" => "market_simulator",
                        "arguments" =>
@@ -243,6 +264,8 @@ defmodule MockInvestmentProvider do
                        "I encountered an issue creating your portfolio. Let me try with a different approach.",
                      "tool_calls" => [
                        %{
+                         "id" => "call_#{:rand.uniform(999_999)}",
+                         "type" => "function",
                          "function" => %{
                            "name" => "portfolio_constructor",
                            "arguments" =>
@@ -268,7 +291,7 @@ defmodule MockInvestmentProvider do
                    "message" => %{
                      "content" =>
                        "I encountered an issue in my analysis. Let me summarize what I know so far.",
-                     "content_only" => true
+                     "role" => "assistant"
                    }
                  }
                ]
@@ -288,7 +311,8 @@ defmodule MockInvestmentProvider do
            "choices" => [
              %{
                "message" => %{
-                 "content" => content
+                 "content" => content,
+                 "role" => "assistant"
                }
              }
            ]
@@ -315,19 +339,33 @@ defmodule MockInvestmentProvider do
   end
 
   defp get_tool_results(messages) do
-    messages
-    |> Enum.filter(fn msg ->
-      is_map(msg) and (msg["role"] == "function" or msg[:role] == "function")
-    end)
-    |> Enum.map(fn msg ->
-      name = msg["name"] || msg[:name]
-      content = msg["content"] || msg[:content]
-      {name, Jason.decode!(content)}
-    end)
-    |> Map.new()
+    # Log the full message list to help with debugging
+    Logger.debug("Messages for tool extraction: #{inspect(messages)}")
+
+    result =
+      messages
+      |> Enum.filter(fn msg ->
+        is_map(msg) and (msg["role"] == "function" or msg[:role] == "function")
+      end)
+      |> Enum.map(fn msg ->
+        name = msg["name"] || msg[:name]
+        content = msg["content"] || msg[:content]
+        Logger.info("Found tool result for: #{name}")
+        {name, Jason.decode!(content)}
+      end)
+      |> Map.new()
+
+    # Log the extracted tool results
+    Logger.debug("Extracted tool results: #{inspect(result)}")
+    result
   end
 
   defp build_conversation_context(last_user_message, tool_results) do
+    # Log output for debugging purposes
+    Logger.info("Building conversation context based on: \"#{last_user_message}\"")
+    Logger.info("Available tool results: #{inspect(Map.keys(tool_results))}")
+    Logger.debug("Detailed tool results: #{inspect(tool_results)}")
+
     # Extract key state information
     question = String.downcase(last_user_message)
 
@@ -336,6 +374,18 @@ defmodule MockInvestmentProvider do
     portfolio = Map.get(tool_results, "portfolio_constructor")
     backtest = Map.get(tool_results, "portfolio_backtester")
     optimized = Map.get(tool_results, "portfolio_optimizer")
+
+    # Log the workflow state progression
+    workflow_state =
+      cond do
+        optimized -> "Phase 4: Portfolio Optimization Complete"
+        backtest -> "Phase 3: Portfolio Backtesting Complete"
+        portfolio -> "Phase 2: Portfolio Construction Complete"
+        screener_result -> "Phase 1: ETF Screening Complete"
+        true -> "Phase 0: Initial Analysis"
+      end
+
+    Logger.info("Current workflow state: #{workflow_state}")
 
     # Detect the latest portfolio version
     latest_portfolio = optimized || portfolio
@@ -385,8 +435,39 @@ defmodule MockInvestmentProvider do
   defp is_new_portfolio_request?(question) do
     question = String.downcase(question)
 
-    contains_keywords?(question, ["create", "build", "design", "new"]) and
-      contains_keywords?(question, ["portfolio", "investment", "etf", "fund"])
+    # Significantly broaden matching conditions, trigger workflow for any investment-related keywords
+    # This improves the success rate of demonstrating dynamic workflow capabilities in the example
+    contains_keywords?(question, [
+      "create",
+      "build",
+      "design",
+      "new",
+      "looking",
+      "want",
+      "need",
+      "help",
+      "advice",
+      "recommend",
+      "suggest",
+      "retirement",
+      "invest",
+      "moderate",
+      "risk",
+      "growth",
+      "income",
+      "conservative",
+      "aggressive",
+      "etf",
+      "fund",
+      "stock",
+      "bond",
+      "allocate",
+      "allocation",
+      "diversify",
+      "portfolio",
+      "investment",
+      "money"
+    ])
   end
 
   defp is_risk_adjustment_request?(question) do
@@ -990,6 +1071,8 @@ defmodule LLMAgent.Examples.InvestmentDemo do
   def run do
     # 1. Configure LLMAgent to use our mock provider
     Application.put_env(:llm_agent, :provider, MockInvestmentProvider)
+    # Set log level to debug for more detailed logging
+    Logger.configure(level: :debug)
 
     # 2. Create store for this example with unique name
     store_name = :"investment_advisor_store_#{System.unique_integer([:positive])}"
@@ -1022,11 +1105,13 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     """
 
     # 5. Create conversation flow with investment tools
+    # Explicitly specify provider as MockInvestmentProvider to ensure our mock implementation is used
     {flow, _fresh_state} =
       Flows.tool_agent(
         system_prompt,
         LLMAgent.Examples.InvestmentTools.get_tools(),
-        store_name: store_name
+        store_name: store_name,
+        provider: MockInvestmentProvider
       )
 
     # 6. Demo intro
@@ -1074,49 +1159,85 @@ defmodule LLMAgent.Examples.InvestmentDemo do
         Flows.tool_agent(
           system_prompt,
           LLMAgent.Examples.InvestmentTools.get_tools(),
-          store_name: store_name
+          store_name: store_name,
+          provider: MockInvestmentProvider
         )
 
-      IO.puts("\n\n=== Scenario #{index} ===\n")
+      IO.puts("\n\n=== Scenario #{index}: Demonstrating Multi-Step Workflow ===\n")
+      Logger.info("Starting scenario #{index} to demonstrate dynamic workflow capabilities")
 
-      # Process each interaction in the conversation
-      Enum.reduce(conversation, fresh_state, fn input, current_state ->
-        IO.puts("\nClient: #{input}")
+      # Run the entire conversation scenario to ensure multiple interaction rounds demonstrate dynamic workflow capabilities
+      _final_state =
+        Enum.reduce(conversation, fresh_state, fn input, current_state ->
+          IO.puts("\nClient: #{input}")
 
-        # Create user message signal
-        signal = Signals.user_message(input)
+          # Create user message signal
+          signal = Signals.user_message(input)
 
-        # Process through the investment flow
-        case flow.(signal, current_state) do
-          {:emit, %{type: :response} = response_signal, new_state} ->
-            display_response({:emit, response_signal})
+          # Process investment flow, including tool calls and response generation
+          case flow.(signal, current_state) do
+            {:emit, %{type: :response} = response_signal, new_state} ->
+              display_response({:emit, response_signal})
 
-            # Store conversation progress in the store for stateful decisions
-            Store.put(store_name, :last_client_message, input)
+              # Store conversation progress for stateful decision making
+              Store.put(store_name, :last_client_message, input)
 
-            new_state
+              # Log workflow progress to demonstrate dynamic workflow capabilities
+              {:ok, tool_results_map} = Store.get(store_name, :tool_results)
+              tools_executed = if tool_results_map, do: Map.keys(tool_results_map), else: []
 
-          {:emit, %{type: :tool_result} = tool_signal, new_state} ->
-            display_response({:emit, tool_signal})
+              if length(tools_executed) > 0 do
+                Logger.info(
+                  "Current workflow progress: #{length(tools_executed)} tools executed: #{inspect(tools_executed)}"
+                )
+              end
 
-            # Store tool result data
-            store_result_data(store_name, {:emit, tool_signal})
+              # Continue processing possible tool calls after response
+              # This ensures the complete conversation flow can be executed
+              # Brief pause to ensure logs are displayed in sequence
+              Process.sleep(100)
+              new_state
 
-            new_state
+            {:emit, %{type: :tool_result} = tool_signal, new_state} ->
+              # Extract tool information before storing
+              tool_name = tool_signal.data.name
 
-          {:error, error} ->
-            IO.puts("Error: #{error}")
+              # Log the tool execution as part of the workflow demonstration
+              Logger.info("Dynamic workflow executing tool: #{tool_name}")
 
-            # Store error for recovery paths
-            Store.put(store_name, :last_error, error)
+              # Display the tool result in a user-friendly format
+              display_response({:emit, tool_signal})
 
-            current_state
+              # Store tool result data for maintaining state across interactions
+              store_result_data(store_name, {:emit, tool_signal})
 
-          unexpected ->
-            IO.puts("Unexpected result: #{inspect(unexpected)}")
-            current_state
-        end
-      end)
+              # Log the next logical workflow phase to demonstrate dynamic progression
+              next_phase =
+                case tool_name do
+                  "etf_screener" -> "Portfolio Construction"
+                  "portfolio_constructor" -> "Portfolio Backtesting"
+                  "portfolio_backtester" -> "Portfolio Optimization"
+                  "portfolio_optimizer" -> "Market Scenario Analysis"
+                  _ -> "Final Response Generation"
+                end
+
+              Logger.info("Dynamic workflow progressing to: #{next_phase}")
+
+              new_state
+
+            {:error, error} ->
+              IO.puts("Error: #{error}")
+
+              # Store error for recovery paths
+              Store.put(store_name, :last_error, error)
+
+              current_state
+
+            unexpected ->
+              IO.puts("Unexpected result: #{inspect(unexpected)}")
+              current_state
+          end
+        end)
     end)
 
     # 8. Demo conclusion with architectural insights
@@ -1191,6 +1312,9 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
   # Reset store between scenarios
   defp reset_store(store_name) do
+    # Log the store reset operation
+    Logger.info("Resetting store state for: #{store_name}")
+
     # Reset store but preserve specific keys
     preserved_keys = [
       :market_volatility,
@@ -1207,10 +1331,17 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
     IO.puts("\n--- Resetting conversation state ---\n")
 
+    # Initialize tool results collection for tracking all tool executions
+    Store.put(store_name, :tool_results, %{})
+
     # We will simply reset the values we want to keep
     Enum.each(preserved_values, fn {key, value} ->
       Store.put(store_name, key, value)
     end)
+
+    # Verify the reset was successful
+    {:ok, tool_results} = Store.get(store_name, :tool_results)
+    Logger.debug("Verified store reset: tool_results = #{inspect(tool_results)}")
   end
 
   # Store result data for stateful decisions
@@ -1218,8 +1349,28 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     tool_name = signal.data.name
     result = signal.data.result
 
+    # Log the tool result being stored
+    Logger.info("Storing tool result for: #{tool_name}")
+    Logger.debug("Tool result data: #{inspect(result)}")
+
+    # Create a complete tool results map in the store to preserve all results
+    # This allows us to demonstrate stateful workflow decisions
+    {:ok, current_tool_results} = Store.get(store_name, :tool_results)
+    current_tool_results = current_tool_results || %{}
+
+    # Add this tool result to the collection
+    updated_results = Map.put(current_tool_results, tool_name, result)
+    Store.put(store_name, :tool_results, updated_results)
+
+    # Log the updated tool results collection
+    Logger.info("Updated tool results in store: #{inspect(Map.keys(updated_results))}")
+
     # Store specific data based on tool type
     case tool_name do
+      "etf_screener" ->
+        Store.put(store_name, :available_etfs, result["etfs"])
+        Store.put(store_name, :screened_categories, result["categories"])
+
       "portfolio_constructor" ->
         Store.put(store_name, :current_portfolio, result)
         Store.put(store_name, :risk_profile, result["risk_profile"])
@@ -1244,27 +1395,34 @@ defmodule LLMAgent.Examples.InvestmentDemo do
   defp store_result_data(_store_name, _result), do: :ok
 
   # Display different types of responses
-  defp display_response({:emit, %{type: :response} = signal}),
-    do: IO.puts("Advisor: #{signal.data}")
+  defp display_response({:emit, %{type: :response} = signal}) do
+    IO.puts("\nAdvisor: #{signal.data}")
+  end
 
-  defp display_response({:emit, %{type: :tool_result} = signal}),
-    do:
-      IO.puts(
-        "Analysis complete: #{format_tool_result(signal.data.name, Jason.encode!(signal.data.result))}"
-      )
+  defp display_response({:emit, %{type: :tool_result} = signal}) do
+    IO.puts("\n[Tool Execution Complete]")
+    IO.puts("* Tool: #{signal.data.name}")
 
-  defp _display_tool_call({:emit, %{type: :tool_call} = signal}),
-    do: IO.puts("Running analysis: #{signal.data.name}")
+    IO.puts(
+      "* Result: #{format_tool_result(signal.data.name, Jason.encode!(signal.data.result))}"
+    )
+  end
 
-  defp _display_error({:emit, %{type: :error} = signal}),
-    do: IO.puts("Error: #{signal.data.message}")
+  # Renamed unused functions with underscore prefix per Elixir convention
+  # These provide documentation value but aren't currently used in this example
+  defp _display_tool_call({:emit, %{type: :tool_call} = signal}) do
+    IO.puts("Running analysis: #{signal.data.name}")
+  end
 
-  defp _display_halt({:halt, response}),
-    do: IO.puts("Final response: #{inspect(response)}")
+  defp _display_error({:emit, %{type: :error} = signal}) do
+    IO.puts("Error: #{signal.data.message}")
+  end
+
+  defp _display_halt({:halt, response}) do
+    IO.puts("Final response: #{inspect(response)}")
+  end
 
   defp _display_skip({:skip, _}), do: nil
-
-  defp display_response(other), do: IO.puts("Unexpected response: #{inspect(other)}")
 
   # Format tool results for display
   defp format_tool_result("etf_screener", result) do
@@ -1272,7 +1430,8 @@ defmodule LLMAgent.Examples.InvestmentDemo do
 
     """
     Found #{result["count"]} ETFs:
-    #{Enum.map_join(result["etfs"], "\n", fn etf -> "- #{etf["ticker"]}: #{etf["name"]} (Risk: #{etf["risk_level"]})" end)}
+    - #{Enum.join(result["etfs"] || [], ", ")}
+    - Categories: #{Enum.join(result["categories"] || [], ", ")}
     """
   end
 
@@ -1280,9 +1439,10 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     result = Jason.decode!(result)
 
     """
-    Created #{String.downcase(result["risk_profile"])} risk portfolio:
-    #{Enum.map_join(result["allocations"], "\n", fn alloc -> "- #{alloc["ticker"]}: #{Float.round(alloc["allocation"] * 100, 1)}%" end)}
-    Expected return: #{Float.round(result["expected_return"], 2)}%
+    #{result["risk_profile"]} Portfolio:
+    #{format_allocation(result["allocation"])}
+    Expected Return: #{result["expected_return"]}
+    Risk Level: #{result["risk_level"]}
     """
   end
 
@@ -1290,11 +1450,23 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     result = Jason.decode!(result)
 
     """
-    Backtest results (#{result["years"]} years):
-    - Initial $100 grew to $#{Float.round(result["final_value"], 2)}
-    - CAGR: #{Float.round(result["cagr"], 2)}%
-    - Sharpe ratio: #{Float.round(result["sharpe_ratio"], 2)}
-    - Max drawdown: #{Float.round(result["max_drawdown"], 2)}%
+    Backtest Results (#{result["years"]} years):
+    - Average Return: #{result["average_return"]}
+    - Volatility: #{result["volatility"]}
+    - Sharpe Ratio: #{result["sharpe_ratio"]}
+    - Max Drawdown: #{result["max_drawdown"]}
+    """
+  end
+
+  defp format_tool_result("portfolio_optimizer", result) do
+    result = Jason.decode!(result)
+
+    """
+    Optimized #{result["risk_profile"]} Portfolio:
+    #{format_allocation(result["allocation"])}
+    Expected Return: #{result["expected_return"]}
+    Risk Level: #{result["risk_level"]}
+    Sharpe Ratio: #{result["sharpe_ratio"]}
     """
   end
 
@@ -1302,17 +1474,25 @@ defmodule LLMAgent.Examples.InvestmentDemo do
     result = Jason.decode!(result)
 
     """
-    #{result["scenario"]} scenario:
-    - Expected return: #{Float.round(result["expected_return"], 2)}%
-    - Volatility: #{if result["volatility_multiplier"] > 1, do: "Increased", else: "Decreased"} (#{result["volatility_multiplier"]}x)
-    - Maximum drawdown: #{Float.round(result["max_drawdown"], 1)}%
-
-    #{result["summary"]}
+    #{result["scenario"]} Simulation:
+    - Return: #{result["return"]}
+    - Risk: #{result["risk"]}
+    - Correlation: #{result["correlation"]}
     """
   end
 
-  defp format_tool_result(tool_name, result) do
-    "#{tool_name} result: #{result}"
+  defp format_tool_result(_name, result) do
+    inspect(result)
+  end
+
+  # Define catch-all clause at the end to properly group all display_response clauses
+  defp display_response(other), do: IO.puts("Unexpected response: #{inspect(other)}")
+
+  # Helper function for portfolio allocation display
+  defp format_allocation(allocation) do
+    allocation
+    |> Enum.map(fn {ticker, percentage} -> "  - #{ticker}: #{percentage * 100}%" end)
+    |> Enum.join("\n")
   end
 end
 
