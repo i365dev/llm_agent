@@ -225,3 +225,13 @@ We welcome contributions from the community! Please see our [Contributing Guide]
 ## License
 
 LLMAgent is released under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## About the Author
+
+This project is maintained by the creator of **MyInvestPilot** —
+a systematic investment assistance platform focused on
+rule-based, long-term investing and transparent strategy research.
+
+🔗 https://www.myinvestpilot.com
